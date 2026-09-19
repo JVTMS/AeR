@@ -19,8 +19,8 @@ const path = require('path');
 const fs   = require('fs');
 
 // ─── Caminho raiz do repositório ───────────────────────────────────────────
-// Sobe 3 níveis de frontend/main/ para chegar em AeR/
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+// De frontend/main/ sobem 2 níveis para chegar em AeR/
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 // Verifica se a pasta é um repositório git válido
 function isGitRepo() {
