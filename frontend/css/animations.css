@@ -1,0 +1,163 @@
+/**
+ * AeR — Animations CSS
+ * Transições de página, micro-animações e efeitos premium.
+ */
+
+/* ── Transição de Página ────────────────────────────────────────────────── */
+.page-enter {
+  animation: pageEnter 300ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.99);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes pageExit {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-8px); }
+}
+
+/* ── Skeleton Loading (placeholder enquanto dados carregam) ─────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-surface-2) 25%,
+    hsla(195, 30%, 20%, 0.5) 50%,
+    var(--color-bg-surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-md);
+  color: transparent !important;
+}
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Number Counter (animação de contagem) ──────────────────────────────── */
+.counter-animate {
+  transition: all var(--transition-base);
+}
+
+/* ── Hover Card 3D Tilt ─────────────────────────────────────────────────── */
+.tilt-card {
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.tilt-card:hover {
+  transform: perspective(800px) rotateX(2deg) rotateY(-2deg) scale(1.02);
+}
+
+/* ── Pulse Ring (alertas, notificações) ─────────────────────────────────── */
+.pulse-ring {
+  position: relative;
+}
+.pulse-ring::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid var(--color-accent-primary);
+  animation: pulse-ring-anim 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  pointer-events: none;
+}
+@keyframes pulse-ring-anim {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%       { opacity: 0;   transform: scale(1.08); }
+}
+
+/* ── Gradient Text Shimmer ──────────────────────────────────────────────── */
+.text-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-accent-primary),
+    var(--color-accent-secondary),
+    var(--color-accent-tertiary),
+    var(--color-accent-primary)
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: text-shimmer-anim 4s linear infinite;
+}
+@keyframes text-shimmer-anim {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+/* ── Floating Particles (fundo decorativo) ──────────────────────────────── */
+.particle {
+  position: fixed;
+  pointer-events: none;
+  border-radius: 50%;
+  opacity: 0;
+  animation: float-particle var(--duration, 8s) var(--delay, 0s) ease-in-out infinite;
+}
+@keyframes float-particle {
+  0%   { opacity: 0; transform: translateY(100vh) scale(0); }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.2; }
+  100% { opacity: 0; transform: translateY(-100px) scale(1.5); }
+}
+
+/* ── Glow Border Animated ───────────────────────────────────────────────── */
+.glow-border {
+  position: relative;
+  border-radius: var(--radius-xl);
+}
+.glow-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: var(--gradient-accent);
+  z-index: -1;
+  opacity: 0;
+  transition: opacity var(--transition-base);
+}
+.glow-border:hover::before {
+  opacity: 1;
+  filter: blur(2px);
+}
+
+/* ── Scan Line (efeito retro cyberpunk) ─────────────────────────────────── */
+.scanline-effect::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    hsla(0, 0%, 0%, 0.03) 2px,
+    hsla(0, 0%, 0%, 0.03) 4px
+  );
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* ── Staggered Children (entrada sequencial) ────────────────────────────── */
+.stagger-children > * {
+  opacity: 0;
+  animation: fadeIn var(--transition-base) ease both;
+}
+.stagger-children > *:nth-child(1)  { animation-delay: 50ms; }
+.stagger-children > *:nth-child(2)  { animation-delay: 100ms; }
+.stagger-children > *:nth-child(3)  { animation-delay: 150ms; }
+.stagger-children > *:nth-child(4)  { animation-delay: 200ms; }
+.stagger-children > *:nth-child(5)  { animation-delay: 250ms; }
+.stagger-children > *:nth-child(6)  { animation-delay: 300ms; }

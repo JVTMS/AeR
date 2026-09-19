@@ -1,0 +1,87 @@
+# ── Node / Electron ────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.pnpm-store/
+dist/
+out/
+release/
+release-builds/
+
+# ── Electron Builder output ────────────────────────────────────────────────
+frontend/dist/
+frontend/out/
+frontend/release/
+Aer/
+
+# ── .NET / C# ─────────────────────────────────────────────────────────────
+backend/**/bin/
+backend/**/obj/
+backend/**/*.user
+backend/**/.vs/
+.vs/
+*.suo
+*.ncrunch*
+*.DotSettings.user
+TestResults/
+BenchmarkDotNet.Artifacts/
+
+# ── Logs ──────────────────────────────────────────────────────────────────
+logs/*.log
+logs/*.txt
+logs/
+
+# ── Banco de Dados local ───────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# ── OS ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# ── Editores ──────────────────────────────────────────────────────────────
+.vscode/settings.json
+.vscode/.ropeproject
+.idea/
+*.swp
+*~
+*.orig
+
+# ── Variáveis de Ambiente / Secrets / Tokens ───────────────────────────────
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+*.secrets.json
+secrets.json
+config.local.json
+
+# ── Certificados e Chaves ──────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+
+# ── Build artifacts ────────────────────────────────────────────────────────
+*.nupkg
+*.snupkg
+publish/
+
+# ── Cache ─────────────────────────────────────────────────────────────────
+.cache/
+*.cache
+
+# ── Temporários ────────────────────────────────────────────────────────────
+*.tmp
+*.temp
+~$*

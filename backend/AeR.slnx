@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="AeR.Api/AeR.Api.csproj" />
+  <Project Path="AeR.Application/AeR.Application.csproj" />
+  <Project Path="AeR.Diagnostics/AeR.Diagnostics.csproj" />
+  <Project Path="AeR.Domain/AeR.Domain.csproj" />
+  <Project Path="AeR.Infrastructure/AeR.Infrastructure.csproj" />
+  <Project Path="AeR.Performance/AeR.Performance.csproj" />
+  <Project Path="AeR.System/AeR.System.csproj" />
+</Solution>

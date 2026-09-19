@@ -1,0 +1,71 @@
+/**
+ * AeR — Design Tokens (v0.3)
+ * Variáveis CSS do sistema de design.
+ */
+:root {
+  /* ── Cores Base ─────────────────────────── */
+  --color-bg-app:        hsl(228, 18%, 10%);
+  --color-bg-surface-1:  hsl(228, 18%, 13%);
+  --color-bg-surface-2:  hsl(228, 18%, 16%);
+  --color-bg-surface-3:  hsl(228, 18%, 19%);
+
+  /* ── Texto ────────────────────────────────*/
+  --color-text-primary:   hsl(210, 20%, 94%);
+  --color-text-secondary: hsl(210, 15%, 70%);
+  --color-text-muted:     hsl(210, 12%, 45%);
+
+  /* ── Bordas ───────────────────────────────*/
+  --color-border-subtle:  hsla(215, 20%, 20%, 0.7);
+  --color-border-default: hsla(215, 20%, 25%, 0.8);
+
+  /* ── Accent ───────────────────────────────*/
+  --color-accent-primary:   hsl(195, 100%, 60%);   /* Ciano */
+  --color-accent-secondary: hsl(265, 80%, 65%);    /* Violeta */
+  --color-accent-tertiary:  hsl(145, 70%, 55%);    /* Verde */
+  --color-accent-warning:   hsl(38,  90%, 58%);    /* Âmbar */
+  --color-accent-danger:    hsl(355, 70%, 55%);    /* Vermelho */
+
+  /* ── Gráficos ─────────────────────────────*/
+  --chart-cpu:  hsl(195, 100%, 60%);
+  --chart-ram:  hsl(145, 70%, 55%);
+  --chart-gpu:  hsl(265, 80%, 65%);
+  --chart-disk: hsl(38,  95%, 58%);
+  --chart-net:  hsl(210, 80%, 60%);
+  --chart-score:hsl(28,  95%, 58%);
+
+  /* ── Gradientes ───────────────────────────*/
+  --gradient-accent: linear-gradient(135deg, hsl(195,100%,60%), hsl(265,80%,65%));
+
+  /* ── Tipografia ───────────────────────────*/
+  --font-ui:   'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-md:   13px;
+  --text-lg:   15px;
+  --text-xl:   18px;
+  --text-2xl:  22px;
+  --text-3xl:  28px;
+
+  /* ── Espaçamentos ─────────────────────────*/
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ── Bordas ───────────────────────────────*/
+  --radius-sm:  5px;
+  --radius-md:  8px;
+  --radius-lg:  10px;
+  --radius-xl:  14px;
+  --radius-2xl: 18px;
+
+  /* ── Transições ───────────────────────────*/
+  --transition-fast: 120ms ease;
+  --transition-base: 200ms ease;
+  --transition-slow: 350ms ease;
+}

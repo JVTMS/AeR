@@ -1,0 +1,347 @@
+/**
+ * AeR — Components CSS
+ * Cards glassmorphism, métricas, botões, badges, loaders.
+ * Todos os componentes reutilizáveis da UI.
+ */
+
+/* ── Metric Card (Glassmorphism) ─────────────────────────────────────────── */
+.metric-card {
+  background: var(--color-bg-surface-1);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  padding: var(--space-5) var(--space-6);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-border-medium), transparent);
+}
+
+.metric-card:hover {
+  border-color: var(--color-border-accent);
+  box-shadow: var(--shadow-glow-cyan);
+  transform: translateY(-2px);
+}
+
+.metric-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.metric-card__title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.metric-card__icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: hsla(195, 100%, 60%, 0.10);
+  color: var(--color-accent-primary);
+}
+
+.metric-card__value {
+  font-size: var(--text-3xl);
+  font-weight: var(--font-weight-bold);
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+  line-height: 1;
+  margin-bottom: var(--space-1);
+  transition: color var(--transition-fast);
+}
+
+.metric-card__unit {
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-light);
+  color: var(--color-text-muted);
+  margin-left: var(--space-1);
+}
+
+.metric-card__subtitle {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-2);
+}
+
+/* Variantes de cor por tipo de métrica */
+.metric-card--cpu    .metric-card__icon { background: hsla(195, 100%, 60%, 0.10); color: var(--chart-cpu); }
+.metric-card--ram    .metric-card__icon { background: hsla(265, 80%, 65%, 0.10);  color: var(--chart-ram); }
+.metric-card--disk   .metric-card__icon { background: hsla(145, 70%, 55%, 0.10);  color: var(--chart-disk); }
+.metric-card--net    .metric-card__icon { background: hsla(38, 95%, 58%, 0.10);   color: var(--chart-net); }
+.metric-card--gpu    .metric-card__icon { background: hsla(320, 75%, 65%, 0.10);  color: var(--chart-gpu); }
+
+.metric-card--cpu:hover    { box-shadow: 0 0 20px hsla(195, 100%, 60%, 0.20); }
+.metric-card--ram:hover    { box-shadow: 0 0 20px hsla(265, 80%, 65%, 0.18); }
+.metric-card--disk:hover   { box-shadow: 0 0 20px hsla(145, 70%, 55%, 0.18); }
+.metric-card--net:hover    { box-shadow: 0 0 20px hsla(38, 95%, 58%, 0.18); }
+.metric-card--gpu:hover    { box-shadow: 0 0 20px hsla(320, 75%, 65%, 0.18); }
+
+/* ── Progress Bar ───────────────────────────────────────────────────────── */
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--color-border-subtle);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-top: var(--space-3);
+}
+
+.progress-bar__fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--gradient-accent);
+  transition: width var(--transition-base);
+  position: relative;
+}
+
+.progress-bar__fill::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 40px; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4));
+  animation: shimmer 2s linear infinite;
+}
+
+/* Variantes de cor */
+.progress-bar__fill--cpu  { background: var(--chart-cpu); box-shadow: 0 0 8px var(--chart-cpu); }
+.progress-bar__fill--ram  { background: var(--chart-ram); box-shadow: 0 0 8px var(--chart-ram); }
+.progress-bar__fill--disk { background: var(--chart-disk); box-shadow: 0 0 8px var(--chart-disk); }
+.progress-bar__fill--gpu  { background: var(--chart-gpu); box-shadow: 0 0 8px var(--chart-gpu); }
+
+/* ── Botões ─────────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-ui);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn--primary {
+  background: var(--gradient-accent);
+  color: var(--color-text-inverse);
+  box-shadow: var(--shadow-glow-cyan);
+}
+
+.btn--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 30px hsla(195, 100%, 60%, 0.35), 0 4px 16px hsla(0,0%,0%,0.3);
+}
+
+.btn--primary:active {
+  transform: translateY(0);
+}
+
+.btn--ghost {
+  background: var(--color-bg-surface-1);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.btn--ghost:hover {
+  background: var(--color-bg-surface-2);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-medium);
+}
+
+.btn--danger {
+  background: hsla(355, 85%, 60%, 0.15);
+  color: var(--color-accent-danger);
+  border: 1px solid hsla(355, 85%, 60%, 0.3);
+}
+
+.btn--danger:hover {
+  background: var(--color-accent-danger);
+  color: white;
+}
+
+/* ── Aliases de compatibilidade (btn-secondary → btn--ghost) ─────────────── */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-ui);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  background: var(--color-bg-surface-1);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-subtle);
+}
+.btn-secondary:hover {
+  background: var(--color-bg-surface-2);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-medium);
+}
+.btn-secondary:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-ui);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  background: hsla(355, 85%, 60%, 0.15);
+  color: var(--color-accent-danger);
+  border: 1px solid hsla(355, 85%, 60%, 0.3);
+}
+.btn-danger:hover {
+  background: var(--color-accent-danger);
+  color: white;
+}
+
+/* ── Badge / Chip ───────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.badge--success {
+  background: hsla(145, 70%, 55%, 0.15);
+  color: var(--color-accent-tertiary);
+  border: 1px solid hsla(145, 70%, 55%, 0.3);
+}
+
+.badge--warning {
+  background: hsla(38, 95%, 58%, 0.15);
+  color: var(--color-accent-warning);
+  border: 1px solid hsla(38, 95%, 58%, 0.3);
+}
+
+.badge--danger {
+  background: hsla(355, 85%, 60%, 0.15);
+  color: var(--color-accent-danger);
+  border: 1px solid hsla(355, 85%, 60%, 0.3);
+}
+
+.badge--info {
+  background: hsla(195, 100%, 60%, 0.10);
+  color: var(--color-accent-primary);
+  border: 1px solid var(--color-border-accent);
+}
+
+/* ── Seção / Page Header ────────────────────────────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: var(--space-8);
+}
+
+.page-header__title {
+  font-size: var(--text-2xl);
+  font-weight: var(--font-weight-bold);
+  background: var(--gradient-accent);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.page-header__subtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  margin-top: var(--space-1);
+}
+
+/* ── Loader Spinner ─────────────────────────────────────────────────────── */
+.loader {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--color-border-subtle);
+  border-top-color: var(--color-accent-primary);
+  border-radius: var(--radius-full);
+  animation: spin 0.8s linear infinite;
+}
+
+/* ── Section divider ────────────────────────────────────────────────────── */
+.section-title {
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-subtle);
+}
+
+/* ── Chart Container ────────────────────────────────────────────────────── */
+.chart-card {
+  background: var(--color-bg-surface-1);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  padding: var(--space-5) var(--space-6);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
+}
+
+.chart-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+}
+
+.chart-card__title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.chart-card canvas {
+  max-height: 200px;
+}
