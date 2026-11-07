@@ -1,4 +1,4 @@
-﻿using AeR.System.Abstractions;
+using AeR.System.Abstractions;
 using AeR.System.Models;
 namespace AeR.System.Optimizations.Services;
 public sealed class DisableDiagTrackOptimization : OptimizationBase
@@ -7,7 +7,7 @@ public sealed class DisableDiagTrackOptimization : OptimizationBase
     public override string Id          => "services.disable-diagtrack";
     public override string Name        => "Desativar Telemetria do Windows (DiagTrack)";
     public override string Description => "Para o servico Connected User Experiences and Telemetry que envia dados para a Microsoft em segundo plano.";
-    public override string Category    => "Servicos";
+    public override string Category    => "Serviços";
     public override OptimizationMode Mode   => OptimizationMode.Both;
     public override RiskLevel         Risk   => RiskLevel.Safe;
     public override BackupStrategy    Backup => BackupStrategy.ServiceState;

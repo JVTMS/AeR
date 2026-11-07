@@ -27,7 +27,10 @@ public sealed class GamePriorityBoostOptimization : OptimizationBase
     public override async Task<OptimizationResult> ApplyAsync(CancellationToken ct)
     {
         // Games task profile
-        await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""GPU Priority"" /t REG_DWORD /d 8 /f", ct);
+        var (exit1, _, err1) = await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""GPU Priority"" /t REG_DWORD /d 8 /f", ct);
+        if (exit1 != 0)
+            return OptimizationResult.Fail("Falha ao aplicar Game Priority Boost (requer Administrador).", err1);
+
         await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""Priority"" /t REG_DWORD /d 6 /f", ct);
         await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""Scheduling Category"" /t REG_SZ /d ""High"" /f", ct);
         await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""SFIO Priority"" /t REG_SZ /d ""High"" /f", ct);
@@ -38,7 +41,10 @@ public sealed class GamePriorityBoostOptimization : OptimizationBase
     }
     public override async Task<OptimizationResult> RevertAsync(CancellationToken ct)
     {
-        await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""GPU Priority"" /t REG_DWORD /d 2 /f", ct);
+        var (exit1, _, err1) = await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""GPU Priority"" /t REG_DWORD /d 2 /f", ct);
+        if (exit1 != 0)
+            return OptimizationResult.Fail("Falha ao reverter Game Priority Boost (requer Administrador).", err1);
+
         await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""Priority"" /t REG_DWORD /d 2 /f", ct);
         await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""Scheduling Category"" /t REG_SZ /d ""Medium"" /f", ct);
         await RunProcessAsync("reg.exe", $@"add ""HKLM\{GamesPath}"" /v ""SFIO Priority"" /t REG_SZ /d ""Normal"" /f", ct);

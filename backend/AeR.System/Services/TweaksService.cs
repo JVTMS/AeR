@@ -111,24 +111,38 @@ public sealed class TweaksService
         return key?.GetValue(name);
     }
 
-    private static bool RunPs(string script, int timeoutMs = 30_000)
+    private static bool RunPs(string script, int timeoutMs = 30_000, bool throwOnError = false)
     {
+        var wrapped = $"$ErrorActionPreference = 'Stop'\ntry {{\n{script}\nexit 0\n}} catch {{\n[Console]::Error.WriteLine($_.Exception.Message)\nexit 1\n}}";
+        var encoded = Convert.ToBase64String(global::System.Text.Encoding.Unicode.GetBytes(wrapped));
         var psi = new Diag.ProcessStartInfo
         {
             FileName               = "powershell.exe",
-            Arguments              = $"-NoProfile -NonInteractive -Command \"{script.Replace("\"", "\\\"")}\"",
+            Arguments              = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}",
             UseShellExecute        = false,
             CreateNoWindow         = true,
             RedirectStandardError  = true,
             RedirectStandardOutput = true,
         };
         using var p = Diag.Process.Start(psi);
-        if (p == null) return false;
+        if (p == null)
+        {
+            if (throwOnError) throw new InvalidOperationException("Não foi possível iniciar o PowerShell.");
+            return false;
+        }
+        var stderr = p.StandardError.ReadToEnd();
         bool exited = p.WaitForExit(timeoutMs);
         if (!exited)
         {
             try { p.Kill(); } catch { }
+            if (throwOnError) throw new TimeoutException("Tempo limite excedido ao executar o comando.");
             return false; // timeout — comando não completou
+        }
+        if (p.ExitCode != 0 && throwOnError)
+        {
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr)
+                ? $"Comando falhou (código {p.ExitCode}). Execute como Administrador."
+                : stderr.Trim());
         }
         return p.ExitCode == 0;
     }
@@ -234,9 +248,9 @@ public sealed class TweaksService
                 Label: "Desativar Hibernação",
                 Description: "Libera espaço em disco ao remover o arquivo hiberfil.sys (desativa hibernação).",
                 Category: "Essential",
-                Apply:   () => RunPs("powercfg /h off"),
-                Revert:  () => RunPs("powercfg /h on"),
-                IsApplied: () => !IO.File.Exists(@"C:\hiberfil.sys")
+                Apply:   () => RunPs("powercfg /h off; if ($LASTEXITCODE -ne 0) { throw 'Falha ao desativar hibernação (requer Administrador).' }", throwOnError: true),
+                Revert:  () => RunPs("powercfg /h on; if ($LASTEXITCODE -ne 0) { throw 'Falha ao ativar hibernação (requer Administrador).' }", throwOnError: true),
+                IsApplied: () => !IO.File.Exists(AppPaths.HiberfilPath)
             ),
 
             new(
@@ -332,7 +346,7 @@ public sealed class TweaksService
                 Label: "Criar Ponto de Restauração",
                 Description: "Cria um ponto de restauração do sistema para reverter mudanças futuras.",
                 Category: "Essential",
-                Apply: () => RunPs("Enable-ComputerRestore -Drive 'C:\\'; Checkpoint-Computer -Description 'AeR Tweak Backup' -RestorePointType MODIFY_SETTINGS"),
+                Apply: () => RunPs($"Enable-ComputerRestore -Drive '{AppPaths.SystemDrive}'; Checkpoint-Computer -Description 'AeR Tweak Backup' -RestorePointType MODIFY_SETTINGS", throwOnError: true),
                 Revert: () => { /* Irreversível */ },
                 IsApplied: () => false // Sempre mostra como não aplicado (ação única)
             ),

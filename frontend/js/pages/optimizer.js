@@ -1,11 +1,21 @@
 import { Logger } from '../utils/logger.js';
-import { getOptimizerCatalog, applyOptimization, revertOptimization } from '../api/pipe-client.js';
+import { getOptimizerCatalog, applyOptimization, revertOptimization, getSystemStatus, elevateBackend } from '../api/pipe-client.js';
 
 const MODULE = 'Optimizer';
 let currentMode = localStorage.getItem('aer-optimizer-mode') || 'leigo';
 let catalog = [];
 let activeFilter = 'all'; // para modo técnico
 let pendingAction = null; // { type: 'apply'|'revert', id } — guardado para o confirm
+let systemStatus = { isAdmin: true, cpuVendor: '', gpuVendor: '' };
+const executedOneShots = new Set();
+
+const ONE_SHOT_IDS = new Set([
+  'memory.clear-working-set',
+  'disk.clean-temp',
+  'disk.clean-prefetch',
+  'net.dns-cache-flush',
+  'disk.trim-ssd',
+]);
 
 export async function mount(container) {
   Logger.info(MODULE, 'Montando página Otimizador...');
@@ -75,9 +85,19 @@ export function unmount() {
 async function loadCatalog(contentDiv) {
   try {
     contentDiv.innerHTML = '<div class="loading-state"><span class="spinner"></span> Carregando cat\u00e1logo de otimiza\u00e7\u00f5es...</div>';
-    const data = await getOptimizerCatalog();
-    if (data && data.length > 0) {
-      catalog = data;
+    const [catRes, sysRes] = await Promise.allSettled([
+      getOptimizerCatalog(),
+      getSystemStatus(),
+    ]);
+
+    if (sysRes.status === 'fulfilled' && sysRes.value) {
+      systemStatus = sysRes.value;
+    }
+
+    if (catRes.status === 'fulfilled' && catRes.value && catRes.value.length > 0) {
+      catalog = catRes.value;
+    } else if (catRes.status === 'rejected') {
+      throw catRes.reason;
     } else {
       // Backend retornou lista vazia — usar catálogo vazio (não mock)
       catalog = [];
@@ -109,9 +129,73 @@ function render(contentDiv) {
   }
 }
 
+function renderAdminBanner() {
+  if (systemStatus.isAdmin) return '';
+  return `
+    <div class="opt-admin-banner">
+      <div class="opt-admin-banner-text">
+        <strong>⚠️ Modo Usuário Padrão:</strong> Otimizações de Registro (HKLM), Energia e Serviços do Windows exigem privilégios de <strong>Administrador</strong> para funcionar sem falhas.
+      </div>
+      <button class="btn-elevate-admin" id="btn-elevate-admin">🛡️ Ativar Modo Administrador</button>
+    </div>
+  `;
+}
+
+async function handleElevateAdmin(contentDiv) {
+  const btn = contentDiv?.querySelector('#btn-elevate-admin');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Aguardando confirmação UAC...';
+  }
+  try {
+    const res = await elevateBackend();
+    if (res?.alreadyAdmin) {
+      systemStatus.isAdmin = true;
+      render(contentDiv);
+      return true;
+    }
+    if (res?.success) {
+      showToast('🛡️ Elevando privilégios... Reconectando ao backend...', 'success');
+      // Aguardar o novo processo elevado abrir o Named Pipe e o Electron reconectar
+      for (let attempt = 0; attempt < 12; attempt++) {
+        await new Promise(r => setTimeout(r, 700));
+        try {
+          const st = await getSystemStatus();
+          if (st) {
+            systemStatus = st;
+            await loadCatalog(contentDiv);
+            showToast('✅ Modo Administrador ativado com sucesso!', 'success');
+            return true;
+          }
+        } catch {
+          // Ainda reconectando...
+        }
+      }
+      await loadCatalog(contentDiv);
+      return systemStatus.isAdmin;
+    } else {
+      showToast(`⚠️ ${res?.message || 'Elevação cancelada.'}`, 'warning');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '🛡️ Ativar Modo Administrador';
+      }
+      return false;
+    }
+  } catch (err) {
+    Logger.error(MODULE, 'Erro durante elevação:', err);
+    showToast(`❌ Erro ao elevar: ${err.message}`, 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🛡️ Ativar Modo Administrador';
+    }
+    return false;
+  }
+}
+
 // ─── MODO LEIGO ────────────────────────────────────────────────────────────
 function renderLeigo(contentDiv) {
   contentDiv.innerHTML = `
+    ${renderAdminBanner()}
     <div class="opt-grid-leigo">
       ${renderPackageCard('Boost para Games', 'Ativa modo jogo, desativa Xbox DVR e otimiza CPU para máximo FPS', '🎮', 'hsl(265, 80%, 65%)', 'Até +15% FPS em jogos pesados')}
       ${renderPackageCard('Boost para Trabalho', 'Limpa memória, desativa serviços desnecessários e otimiza disco', '💼', 'hsl(195, 100%, 60%)', 'Sistema mais responsivo')}
@@ -126,6 +210,11 @@ function renderLeigo(contentDiv) {
       </div>
     </div>
   `;
+
+  const elevateBtn = contentDiv.querySelector('#btn-elevate-admin');
+  if (elevateBtn) {
+    elevateBtn.addEventListener('click', () => handleElevateAdmin(contentDiv));
+  }
 
   // Bind cards
   const cards = contentDiv.querySelectorAll('.opt-pkg-card');
@@ -179,11 +268,14 @@ function renderTecnico(contentDiv) {
     filtered = filtered.filter(o => (o.category || 'Geral') === activeCategory);
   }
 
-  const safeCount    = catalog.filter(o => !o.isApplied && (o.risk||'safe').toLowerCase() === 'safe').length;
-  const appliedCount = catalog.filter(o => o.isApplied).length;
-  const nvidiaOpts   = catalog.filter(o => (o.category||'').toLowerCase() === 'gpu');
+  const isOptDone    = (o) => o.isApplied || executedOneShots.has(o.id);
+  const safeCount    = catalog.filter(o => !isOptDone(o) && (o.risk||'safe').toLowerCase() === 'safe').length;
+  const appliedCount = catalog.filter(o => isOptDone(o)).length;
+  const gpuOpts      = catalog.filter(o => (o.category||'').toLowerCase() === 'gpu');
+  const gpuLabel     = systemStatus.gpuVendor ? `GPU (${systemStatus.gpuVendor})` : 'GPU';
 
   contentDiv.innerHTML = `
+    ${renderAdminBanner()}
     <!-- Stats rápidos -->
     <div class="opt-quick-stats">
       <div class="opt-qstat">
@@ -199,8 +291,8 @@ function renderTecnico(contentDiv) {
         <span class="opt-qstat-label">Seguros Pendentes</span>
       </div>
       <div class="opt-qstat">
-        <span class="opt-qstat-num" style="color:#e67e22">${nvidiaOpts.length}</span>
-        <span class="opt-qstat-label">NVIDIA</span>
+        <span class="opt-qstat-num" style="color:#e67e22">${gpuOpts.length}</span>
+        <span class="opt-qstat-label">${gpuLabel}</span>
       </div>
       <!-- Botão Aplicar Tudo Seguro -->
       <button class="btn-apply-all-safe" id="btn-apply-all-safe" ${safeCount === 0 ? 'disabled' : ''}>
@@ -240,7 +332,24 @@ function renderTecnico(contentDiv) {
         <tbody>
           ${filtered.length === 0
             ? '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--color-text-muted);">Nenhuma otimização nesta categoria.</td></tr>'
-            : filtered.map(opt => `
+            : filtered.map(opt => {
+                const isOneShot = ONE_SHOT_IDS.has(opt.id);
+                const doneOneShot = isOneShot && executedOneShots.has(opt.id);
+                const statusClass = (opt.isApplied || doneOneShot) ? 'applied' : 'none';
+                const statusText  = opt.isApplied
+                  ? '✓ Ativo'
+                  : doneOneShot
+                    ? '✓ Executado'
+                    : isOneShot
+                      ? 'Ação imediata'
+                      : 'Inativo';
+                const btnClass = opt.isApplied ? 'btn-revert' : 'btn-apply';
+                const btnText  = opt.isApplied
+                  ? '↩ Reverter'
+                  : isOneShot
+                    ? (doneOneShot ? '↻ Executar' : '▶ Executar')
+                    : '▶ Aplicar';
+                return `
             <tr class="opt-row" data-id="${opt.id}">
               <td>
                 <div class="opt-name">${opt.name}</div>
@@ -248,19 +357,25 @@ function renderTecnico(contentDiv) {
               </td>
               <td><span class="badge category-badge">${opt.category || 'Geral'}</span></td>
               <td>${riskBadge(opt.risk)}</td>
-              <td><span class="badge status-${opt.isApplied ? 'applied' : 'none'}">${opt.isApplied ? '✓ Ativo' : 'Inativo'}</span></td>
+              <td><span class="badge status-${statusClass}">${statusText}</span></td>
               <td>
-                <button class="btn-toggle ${opt.isApplied ? 'btn-revert' : 'btn-apply'}" data-opt-id="${opt.id}">
-                  ${opt.isApplied ? '↩ Reverter' : '▶ Aplicar'}
+                <button class="btn-toggle ${btnClass}" data-opt-id="${opt.id}">
+                  ${btnText}
                 </button>
               </td>
             </tr>
-          `).join('')
+          `;
+              }).join('')
           }
         </tbody>
       </table>
     </div>
   `;
+
+  const elevateBtn = contentDiv.querySelector('#btn-elevate-admin');
+  if (elevateBtn) {
+    elevateBtn.addEventListener('click', () => handleElevateAdmin(contentDiv));
+  }
 
   // Bind filtros de risco
   contentDiv.querySelectorAll('.btn-filter').forEach(btn => {
@@ -308,7 +423,14 @@ function riskBadge(risk) {
 
 // ── Aplicar Tudo Seguro ────────────────────────────────────────────────────
 async function applyAllSafe(contentDiv) {
-  const safeOptimizations = catalog.filter(o => !o.isApplied && (o.risk || 'safe').toLowerCase() === 'safe');
+  if (!systemStatus.isAdmin) {
+    const elevated = await handleElevateAdmin(contentDiv);
+    if (!elevated) return;
+  }
+
+  const safeOptimizations = catalog.filter(
+    o => !o.isApplied && !executedOneShots.has(o.id) && (o.risk || 'safe').toLowerCase() === 'safe'
+  );
   if (safeOptimizations.length === 0) return;
 
   const applyAllBtn = contentDiv?.querySelector('#btn-apply-all-safe');
@@ -318,18 +440,26 @@ async function applyAllSafe(contentDiv) {
   }
 
   let done = 0, failed = 0;
+  const failedReasons = [];
   for (const opt of safeOptimizations) {
     try {
       const result = await applyOptimization(opt.id);
       if (result?.success) {
-        opt.isApplied = true;
+        if (ONE_SHOT_IDS.has(opt.id)) {
+          executedOneShots.add(opt.id);
+        } else {
+          opt.isApplied = true;
+        }
         done++;
       } else {
         failed++;
-        Logger.error(MODULE, `Falha ao aplicar ${opt.id}: ${result?.message}`);
+        const msg = result?.message || 'Erro desconhecido';
+        failedReasons.push(`${opt.name}: ${msg}`);
+        Logger.error(MODULE, `Falha ao aplicar ${opt.id}: ${msg}`);
       }
     } catch(e) {
       failed++;
+      failedReasons.push(`${opt.name}: ${e.message}`);
       Logger.error(MODULE, `Erro ao aplicar ${opt.id}`, e);
     }
     if (applyAllBtn) {
@@ -340,10 +470,10 @@ async function applyAllSafe(contentDiv) {
   showToast(
     failed === 0
       ? `\u2705 ${done} otimiza\u00e7\u00f5es aplicadas com sucesso!`
-      : `\u26a0\ufe0f ${done} aplicadas, ${failed} falharam`,
+      : `\u26a0\ufe0f ${done} aplicadas, ${failed} falharam (${failedReasons[0] || ''})`,
     failed === 0 ? 'success' : 'error'
   );
-  setTimeout(() => renderTecnico(contentDiv), 500);
+  setTimeout(() => loadCatalog(contentDiv), 350);
 }
 
 
@@ -435,14 +565,28 @@ function showModal(data, mode) {
     confirmBtn.onclick = async () => {
       confirmBtn.disabled = true;
       confirmBtn.innerText = 'Aplicando...';
+      if (!systemStatus.isAdmin) {
+        const contentDiv = document.getElementById('opt-content');
+        const elevated = await handleElevateAdmin(contentDiv);
+        if (!elevated) {
+          closeModal();
+          confirmBtn.disabled = false;
+          confirmBtn.innerText = 'Aplicar Agora ✓';
+          return;
+        }
+      }
       let done = 0, failed = 0;
       for (const id of ids) {
         try {
           const r = await applyOptimization(id);
           if (r?.success) {
             done++;
-            const entry = catalog.find(o => o.id === id);
-            if (entry) entry.isApplied = true;
+            if (ONE_SHOT_IDS.has(id)) {
+              executedOneShots.add(id);
+            } else {
+              const entry = catalog.find(o => o.id === id);
+              if (entry) entry.isApplied = true;
+            }
           } else {
             failed++;
             Logger.error(MODULE, `Falha ao aplicar ${id}: ${r?.message}`);
@@ -499,9 +643,10 @@ function showModal(data, mode) {
 
   } else {
     // modo técnico — data = OptimizationDescriptor
-    const isApplied = !!data.isApplied;
-    const actionText = isApplied ? 'Reverter Agora ↺' : 'Aplicar Agora ✓';
-    const actionProgress = isApplied ? 'Revertendo...' : 'Aplicando...';
+    const isOneShot = ONE_SHOT_IDS.has(data.id);
+    const isApplied = !isOneShot && !!data.isApplied;
+    const actionText = isApplied ? 'Reverter Agora ↺' : (isOneShot ? 'Executar Agora ▶' : 'Aplicar Agora ✓');
+    const actionProgress = isApplied ? 'Revertendo...' : (isOneShot ? 'Executando...' : 'Aplicando...');
 
     title.innerText = `⚙️ ${data.name}`;
     body.innerHTML = `
@@ -515,7 +660,7 @@ function showModal(data, mode) {
       </div>
       <div class="modal-section info">
         <h3>🔄 BACKUP</h3>
-        <p>${data.isReversible ? 'Esta otimização pode ser revertida.' : 'Esta ação não é reversível automaticamente.'}</p>
+        <p>${isOneShot ? 'Ação de limpeza/manutenção imediata.' : 'Esta otimização pode ser revertida a qualquer momento.'}</p>
       </div>
     `;
     confirmBtn.innerText = actionText;
@@ -529,8 +674,12 @@ function showModal(data, mode) {
           : await applyOptimization(data.id);
 
         if (r?.success) {
-          data.isApplied = !isApplied;
-          showToast(`\u2705 ${!isApplied ? 'Aplicado' : 'Revertido'}: ${data.name}`, 'success');
+          if (isOneShot) {
+            executedOneShots.add(data.id);
+          } else {
+            data.isApplied = !isApplied;
+          }
+          showToast(`\u2705 ${r.message || (!isApplied ? 'Aplicado' : 'Revertido')}: ${data.name}`, 'success');
         } else {
           showToast(`\u274c Falha: ${r?.message || 'Erro ao processar'}`, 'error');
           Logger.error(MODULE, `Falha ao processar ${data.id}:`, r?.message);
@@ -1081,6 +1230,46 @@ function injectOptimizerStyles() {
     .opt-toast-success { border-left: 3px solid #2ecc71; }
     .opt-toast-warning { border-left: 3px solid #f1c40f; }
     .opt-toast-error   { border-left: 3px solid #e74c3c; }
+
+    /* Admin Warning Banner */
+    .opt-admin-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      background: rgba(241, 196, 15, 0.12);
+      border: 1px solid rgba(241, 196, 15, 0.4);
+      border-left: 4px solid #f1c40f;
+      border-radius: var(--radius-lg);
+      padding: var(--space-3) var(--space-4);
+      margin-bottom: var(--space-4);
+      flex-wrap: wrap;
+    }
+    .opt-admin-banner-text {
+      font-size: var(--text-sm);
+      color: var(--color-text-primary);
+      line-height: 1.4;
+    }
+    .btn-elevate-admin {
+      background: linear-gradient(135deg, #f1c40f 0%, #e67e22 100%);
+      color: #000;
+      border: none;
+      border-radius: var(--radius-md);
+      padding: 8px 16px;
+      font-size: var(--text-xs);
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: filter 0.15s, transform 0.1s;
+    }
+    .btn-elevate-admin:hover:not(:disabled) {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+    }
+    .btn-elevate-admin:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
   `;
   document.head.appendChild(style);
 }

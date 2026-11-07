@@ -55,18 +55,18 @@ public sealed class DisableCStatesOptimization : OptimizationBase
 
     public override async Task<OptimizationResult> ApplyAsync(CancellationToken ct)
     {
-        await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT SUB_PROCESSOR 5d76a2ca-e8c0-402f-a133-2158492d58ad 0", ct);
+        var (exit1, _, err1) = await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT SUB_PROCESSOR 5d76a2ca-e8c0-402f-a133-2158492d58ad 0", ct);
         await RunProcessAsync("powercfg.exe", "/setdcvalueindex SCHEME_CURRENT SUB_PROCESSOR 5d76a2ca-e8c0-402f-a133-2158492d58ad 0", ct);
-        var (exit, _, err) = await RunProcessAsync("powercfg.exe", "/apply", ct);
-        return exit == 0
+        var (exit2, _, err2) = await RunProcessAsync("powercfg.exe", "/setactive SCHEME_CURRENT", ct);
+        return (exit1 == 0 && exit2 == 0)
             ? OptimizationResult.Ok("C-States desativados. CPU sempre em C0 (ativo).")
-            : OptimizationResult.Fail("Falha ao desativar C-States.", err);
+            : OptimizationResult.Fail("Falha ao desativar C-States.", string.IsNullOrWhiteSpace(err1) ? err2 : err1);
     }
 
     public override async Task<OptimizationResult> RevertAsync(CancellationToken ct)
     {
         await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT SUB_PROCESSOR 5d76a2ca-e8c0-402f-a133-2158492d58ad 100", ct);
-        await RunProcessAsync("powercfg.exe", "/apply", ct);
+        await RunProcessAsync("powercfg.exe", "/setactive SCHEME_CURRENT", ct);
         return OptimizationResult.Ok("C-States restaurados ao padrao.");
     }
 }

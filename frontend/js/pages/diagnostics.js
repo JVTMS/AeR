@@ -238,8 +238,8 @@ function injectStyles() {
     .diag-issue-ok { color:#2ecc71; font-size:var(--text-sm); font-weight:500; }
     .diag-uptime { font-size:var(--text-xs); color:var(--color-text-muted); margin-top:var(--space-2); }
 
-    /* Cards de métricas */
-    .diag-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:var(--space-4); }
+    /* Cards de métricas Responsivos */
+    .diag-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap:var(--space-4); }
     .diag-metric-card { background:var(--color-bg-surface-1); border:1px solid var(--color-border-subtle); border-radius:var(--radius-lg); padding:var(--space-4); }
     .diag-metric-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--space-2); }
     .diag-metric-name { font-size:var(--text-xs); font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--color-text-muted); }

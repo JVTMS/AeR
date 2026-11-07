@@ -1,4 +1,4 @@
-﻿using AeR.System.Abstractions;
+using AeR.System.Abstractions;
 using AeR.System.Models;
 namespace AeR.System.Optimizations.Services;
 public sealed class DisableRemoteRegistryOptimization : OptimizationBase
@@ -7,7 +7,7 @@ public sealed class DisableRemoteRegistryOptimization : OptimizationBase
     public override string Id          => "services.disable-remote-registry";
     public override string Name        => "Desativar Remote Registry";
     public override string Description => "Para o servico que permite acesso remoto ao registro do Windows, melhorando seguranca e liberando recursos.";
-    public override string Category    => "Servicos";
+    public override string Category    => "Serviços";
     public override OptimizationMode Mode   => OptimizationMode.Both;
     public override RiskLevel         Risk   => RiskLevel.Safe;
     public override BackupStrategy    Backup => BackupStrategy.ServiceState;

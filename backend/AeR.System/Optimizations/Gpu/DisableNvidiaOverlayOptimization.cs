@@ -1,4 +1,4 @@
-﻿using AeR.System.Abstractions;
+using AeR.System.Abstractions;
 using AeR.System.Models;
 namespace AeR.System.Optimizations.Gpu;
 /// <summary>Desativa o overlay da GeForce Experience que consome GPU em todo jogo.</summary>
@@ -31,10 +31,12 @@ public sealed class DisableNvidiaOverlayOptimization : OptimizationBase
     public override async Task<OptimizationResult> ApplyAsync(CancellationToken ct)
     {
         // Desativar NvTray (overlay principal)
-        await RunProcessAsync("reg.exe", $@"add ""HKCU\{RegPath}"" /v {RegValue} /t REG_DWORD /d 0 /f", ct);
+        var (exit, _, err) = await RunProcessAsync("reg.exe", $@"add ""HKCU\{RegPath}"" /v {RegValue} /t REG_DWORD /d 0 /f", ct);
         // Matar processo NvTray se rodando
         await RunProcessAsync("taskkill.exe", "/F /IM NvTray.exe", ct);
-        return OptimizationResult.Ok("Overlay GeForce Experience desativado.");
+        return exit == 0
+            ? OptimizationResult.Ok("Overlay GeForce Experience desativado.")
+            : OptimizationResult.Fail("Falha ao desativar Overlay NVIDIA.", err);
     }
     public override async Task<OptimizationResult> RevertAsync(CancellationToken ct)
     {

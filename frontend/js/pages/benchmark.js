@@ -251,8 +251,8 @@ function injectStyles() {
     .btn-bench-all:hover { filter:brightness(1.1); }
     .btn-bench-all:disabled { opacity:.6; cursor:not-allowed; }
 
-    /* Cards */
-    .bench-cards { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--space-4); }
+    /* Cards Responsivos */
+    .bench-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap:var(--space-4); }
     .bench-card { background:var(--color-bg-surface-1); border:1px solid var(--color-border-subtle); border-radius:var(--radius-xl); padding:var(--space-5); transition:border-color var(--transition-fast); }
     .bench-card.running { border-color:var(--color-accent-primary); animation:bench-pulse 1.5s ease-in-out infinite; }
     @keyframes bench-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(0,255,136,0)} 50%{box-shadow:0 0 0 4px rgba(0,255,136,.15)} }

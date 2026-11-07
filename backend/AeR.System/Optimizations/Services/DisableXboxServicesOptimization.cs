@@ -53,7 +53,9 @@ public sealed class DisableXboxServicesOptimization : OptimizationBase
         foreach (var svc in XboxServices)
         {
             await RunProcessAsync("sc.exe", $"stop {svc}", ct);
-            await RunProcessAsync("sc.exe", $"config {svc} start= disabled", ct);
+            var (exit, _, err) = await RunProcessAsync("sc.exe", $"config {svc} start= disabled", ct);
+            if (exit != 0)
+                return OptimizationResult.Fail($"Falha ao desativar serviço {svc} (requer Administrador).", err);
         }
         return OptimizationResult.Ok($"{XboxServices.Length} serviços Xbox desativados.");
     }
@@ -62,7 +64,9 @@ public sealed class DisableXboxServicesOptimization : OptimizationBase
     {
         foreach (var svc in XboxServices)
         {
-            await RunProcessAsync("sc.exe", $"config {svc} start= demand", ct);
+            var (exit, _, err) = await RunProcessAsync("sc.exe", $"config {svc} start= demand", ct);
+            if (exit != 0)
+                return OptimizationResult.Fail($"Falha ao reativar serviço {svc} (requer Administrador).", err);
             await RunProcessAsync("sc.exe", $"start {svc}", ct);
         }
         return OptimizationResult.Ok("Serviços Xbox reativados.");

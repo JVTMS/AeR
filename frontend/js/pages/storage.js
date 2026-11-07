@@ -114,7 +114,7 @@ function injectStyles() {
   if (document.getElementById('storage-styles')) return;
   const s = document.createElement('style'); s.id = 'storage-styles';
   s.textContent = `.storage-page{display:flex;flex-direction:column;height:100%;overflow-y:auto}
-    .storage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--space-5);padding:var(--space-2)}
+    .storage-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(260px, 100%),1fr));gap:var(--space-5);padding:var(--space-2)}
     .storage-card{background:var(--color-bg-surface-1);border:1px solid var(--color-border-subtle);border-radius:var(--radius-xl);padding:var(--space-5);transition:var(--transition-base)}
     .storage-card:hover{border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.2)}
     .storage-card__header{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4)}
@@ -127,7 +127,7 @@ function injectStyles() {
     .st-label{font-size:var(--text-xs);color:var(--color-text-muted)}.st-val{font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary)}
     /* ── SMART (Fase 27) ── */
     .storage-section-title{font-size:var(--text-sm);font-weight:700;color:var(--color-text-primary);margin:var(--space-5) 0 var(--space-3);padding-left:var(--space-2);}
-    .smart-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:var(--space-4);}
+    .smart-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(280px, 100%),1fr));gap:var(--space-4);}
     .smart-card{background:var(--color-bg-surface-1);border:1px solid var(--color-border-subtle);border-radius:var(--radius-xl);padding:var(--space-4) var(--space-5);}
     .smart-card-header{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3);}
     .smart-disk-icon{font-size:1.8rem;flex-shrink:0;}

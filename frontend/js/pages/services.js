@@ -4,13 +4,14 @@
  */
 
 import { Logger } from '../utils/logger.js';
-import { invoke } from '../api/pipe-client.js';
+import { invoke, getSystemStatus, elevateBackend } from '../api/pipe-client.js';
 
 const MODULE = 'Services';
 
 let services    = [];
 let filterText  = '';
 let filterState = 'all';
+let isAdmin     = true;
 
 // ─── Mount / Unmount ─────────────────────────────────────────────────────────
 
@@ -96,7 +97,11 @@ async function loadServices() {
   const tbody = document.getElementById('svc-tbody');
   if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="svc-loading"><span class="spinner-svc"></span> Carregando...</td></tr>`;
   try {
-    const data = await invoke('services:list');
+    const [data, sys] = await Promise.all([
+      invoke('services:list'),
+      getSystemStatus().catch(() => null),
+    ]);
+    if (sys && typeof sys.isAdmin === 'boolean') isAdmin = sys.isAdmin;
     if (Array.isArray(data)) {
       services = data;
       renderTable();
@@ -179,6 +184,22 @@ async function handleAction(name, action, btn) {
   btn.disabled = true;
   btn.textContent = ACTION_LABELS[action] ?? '...';
   try {
+    if (!isAdmin) {
+      const elev = await elevateBackend();
+      if (elev?.success) {
+        for (let i = 0; i < 12; i++) {
+          await new Promise(r => setTimeout(r, 700));
+          try {
+            const st = await getSystemStatus();
+            if (st?.isAdmin) { isAdmin = true; break; }
+          } catch { }
+        }
+      } else {
+        showToast('É necessário privilégio de Administrador para controlar serviços.', 'error');
+        btn.disabled = false; btn.textContent = original;
+        return;
+      }
+    }
     const result = await invoke('services:control', { name, action });
     if (result?.success) {
       showToast(`${name}: ${original} concluido.`, 'success');

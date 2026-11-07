@@ -51,7 +51,17 @@ public abstract class OptimizationBase : IOptimization
 
     protected Task<(int exitCode, string stdout, string stderr)> RunPowerShellAsync(string script, CancellationToken ct = default)
     {
-        return RunProcessAsync("powershell.exe", $"-NoProfile -NonInteractive -Command \"{script}\"", ct);
+        var wrappedScript = $@"
+$ErrorActionPreference = 'Stop'
+try {{
+{script}
+exit 0
+}} catch {{
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}}";
+        var encoded = Convert.ToBase64String(global::System.Text.Encoding.Unicode.GetBytes(wrappedScript));
+        return RunProcessAsync("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}", ct);
     }
 
     protected Task<(int exitCode, string stdout, string stderr)> RunRegExportAsync(string keyPath, string outputFile, CancellationToken ct = default)

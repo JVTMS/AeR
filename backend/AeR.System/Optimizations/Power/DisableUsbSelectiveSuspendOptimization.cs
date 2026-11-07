@@ -34,19 +34,26 @@ public sealed class DisableUsbSelectiveSuspendOptimization : OptimizationBase
         ref Guid PowerSettingGuid,
         out uint AcValueIndex);
 
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr hMem);
+
     public override bool IsApplied()
     {
         try
         {
             if (PowerGetActiveScheme(IntPtr.Zero, out var ptr) == 0 && ptr != IntPtr.Zero)
             {
-                var scheme = Marshal.PtrToStructure<Guid>(ptr);
-                var subGroup = SubGroupGuid;
-                var setting = SettingGuid;
-                if (PowerReadACValueIndex(IntPtr.Zero, ref scheme, ref subGroup, ref setting, out var val) == 0)
+                try
                 {
-                    return val == 0;
+                    var scheme = Marshal.PtrToStructure<Guid>(ptr);
+                    var subGroup = SubGroupGuid;
+                    var setting = SettingGuid;
+                    if (PowerReadACValueIndex(IntPtr.Zero, ref scheme, ref subGroup, ref setting, out var val) == 0)
+                    {
+                        return val == 0;
+                    }
                 }
+                finally { LocalFree(ptr); }
             }
         }
         catch { }
@@ -55,16 +62,18 @@ public sealed class DisableUsbSelectiveSuspendOptimization : OptimizationBase
     public override async Task<OptimizationResult> ApplyAsync(CancellationToken ct)
     {
         // Desativar USB Selective Suspend (valor = 0 = desativado)
-        await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0", ct);
-        var (exit, _, err) = await RunProcessAsync("powercfg.exe", "/apply", ct);
-        return exit == 0
+        var (exit1, _, err1) = await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0", ct);
+        await RunProcessAsync("powercfg.exe", "/setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0", ct);
+        var (exit2, _, err2) = await RunProcessAsync("powercfg.exe", "/setactive SCHEME_CURRENT", ct);
+        return (exit1 == 0 && exit2 == 0)
             ? OptimizationResult.Ok("USB Selective Suspend desativado.")
-            : OptimizationResult.Fail("Falha.", err);
+            : OptimizationResult.Fail("Falha ao desativar USB Selective Suspend.", string.IsNullOrWhiteSpace(err1) ? err2 : err1);
     }
     public override async Task<OptimizationResult> RevertAsync(CancellationToken ct)
     {
         await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 1", ct);
-        await RunProcessAsync("powercfg.exe", "/apply", ct);
+        await RunProcessAsync("powercfg.exe", "/setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 1", ct);
+        await RunProcessAsync("powercfg.exe", "/setactive SCHEME_CURRENT", ct);
         return OptimizationResult.Ok("USB Selective Suspend restaurado.");
     }
 }

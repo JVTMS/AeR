@@ -31,6 +31,17 @@ a { text-decoration: none; color: inherit; }
 
 button { cursor: pointer; }
 
+/* Proteção contra estouro de imagens e vetores */
+img, svg {
+  max-width: 100%;
+  flex-shrink: 0;
+}
+
+/* Proteção global de min-width para containers flex/grid */
+.shell, .main, .page-container, [class*="-grid"], [class*="-wrap"] {
+  min-width: 0;
+}
+
 h1, h2, h3, h4, h5, h6 {
   font-weight: 600;
   color: var(--color-text-primary);

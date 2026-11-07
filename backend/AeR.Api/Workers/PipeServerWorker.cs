@@ -15,6 +15,7 @@
  */
 
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -53,6 +54,7 @@ public sealed class PipeServerWorker : BackgroundService
     };
 
     private readonly ILogger<PipeServerWorker> _logger;
+    private readonly IHostApplicationLifetime _lifetime;
     private readonly MetricsService _metrics;
     private readonly OptimizationCatalog _catalog;
     private readonly OptimizationEngine  _engine;
@@ -63,6 +65,7 @@ public sealed class PipeServerWorker : BackgroundService
 
     public PipeServerWorker(
         ILogger<PipeServerWorker> logger,
+        IHostApplicationLifetime lifetime,
         MetricsService metrics,
         OptimizationCatalog catalog,
         OptimizationEngine engine,
@@ -72,6 +75,7 @@ public sealed class PipeServerWorker : BackgroundService
         TweaksService tweaks)
     {
         _logger     = logger;
+        _lifetime   = lifetime;
         _metrics    = metrics;
         _catalog    = catalog;
         _engine     = engine;
@@ -138,7 +142,9 @@ public sealed class PipeServerWorker : BackgroundService
                 () => MetricsPushLoopAsync(writer, writeLock, sessionCts.Token),
                 sessionCts.Token);
 
-            // Loop de leitura de comandos
+            var inflightTasks = new List<Task>();
+
+            // Loop de leitura de comandos (processamento concorrente sem head-of-line blocking)
             while (pipe.IsConnected && !sessionCts.Token.IsCancellationRequested)
             {
                 string? line;
@@ -149,20 +155,44 @@ public sealed class PipeServerWorker : BackgroundService
                 if (line is null) break;
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
-                var response = await DispatchCommandAsync(line);
+                inflightTasks.RemoveAll(t => t.IsCompleted);
 
-                await writeLock.WaitAsync(sessionCts.Token);
-                try
+                var cmdLine = line;
+                var cmdTask = Task.Run(async () =>
                 {
-                    await writer.WriteLineAsync(response.AsMemory(), sessionCts.Token);
-                    await writer.FlushAsync(sessionCts.Token);
-                }
-                finally { writeLock.Release(); }
+                    try
+                    {
+                        var response = await DispatchCommandAsync(cmdLine);
+
+                        await writeLock.WaitAsync(sessionCts.Token);
+                        try
+                        {
+                            if (pipe.IsConnected && !sessionCts.Token.IsCancellationRequested)
+                            {
+                                await writer.WriteLineAsync(response.AsMemory(), sessionCts.Token);
+                                await writer.FlushAsync(sessionCts.Token);
+                            }
+                        }
+                        finally { writeLock.Release(); }
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (IOException) { }
+                    catch (ObjectDisposedException) { }
+                    catch (Exception ex) { _logger.LogError(ex, "Erro ao processar comando IPC."); }
+                }, sessionCts.Token);
+
+                inflightTasks.Add(cmdTask);
             }
 
-            // Encerrar push loop graciosamente
+            // Encerrar push loop e aguardar comandos em andamento graciosamente
             await sessionCts.CancelAsync();
-            await pushTask.WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(inflightTasks.Append(pushTask))
+                    .WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch { }
 
             _logger.LogInformation("Sessão de cliente encerrada.");
         }
@@ -194,6 +224,7 @@ public sealed class PipeServerWorker : BackgroundService
                 await Task.Delay(MetricsPushInterval, ct);
 
                 var snapshot = _metrics.GetSnapshot();
+                AppendToHistory(snapshot);
                 var push = JsonSerializer.Serialize(
                     new { @event = "metrics:update", data = snapshot },
                     JsonOptions
@@ -253,7 +284,27 @@ public sealed class PipeServerWorker : BackgroundService
                     framework = "net10.0",
                     timestamp = DateTimeOffset.UtcNow,
                     uptimeMs  = Environment.TickCount64,
+                    isAdmin   = IsRunningAsAdmin(),
                 },
+
+                // ── Sistema: Status de Privilégio e Hardware ──────────────────
+                "system:status" => new
+                {
+                    isAdmin      = IsRunningAsAdmin(),
+                    cpuVendor    = _catalog.CpuVendor,
+                    gpuVendor    = _catalog.GpuVendor,
+                    isAmdCpu     = _catalog.IsAmdCpu,
+                    isIntelCpu   = _catalog.IsIntelCpu,
+                    hasNvidiaGpu = _catalog.HasNvidiaGpu,
+                    hasAmdGpu    = _catalog.HasAmdGpu,
+                    hasIntelGpu  = _catalog.HasIntelGpu,
+                    isLaptop     = _catalog.IsLaptop,
+                    systemDrive  = AppPaths.SystemDrive,
+                    dataRoot     = AppPaths.DataRoot,
+                },
+
+                // ── Sistema: Elevar Backend como Administrador (UAC) ──────────
+                "system:elevate" => HandleSystemElevate(),
 
                 // ── Métricas: Snapshot sob demanda ────────────────────────────
                 "metrics:get" => _metrics.GetSnapshot(),
@@ -589,13 +640,16 @@ public sealed class PipeServerWorker : BackgroundService
         double ramScore    = Math.Max(0, 100 - snapshot.RamPercent);
         double diskScore   = Math.Max(0, 100 - snapshot.DiskActivityPercent);
 
-        // Espaço em disco C:\
+        // Espaço na unidade do sistema operacional
         double diskFreeGb  = 0;
         double diskTotalGb = 0;
         double diskFreeScore = 100;
         try
         {
-            var drive = DriveInfo.GetDrives().FirstOrDefault(d => d.Name == "C:\\" && d.IsReady);
+            var sysDrive = AppPaths.SystemDrive;
+            var drive = DriveInfo.GetDrives().FirstOrDefault(d =>
+                string.Equals(d.Name, sysDrive, StringComparison.OrdinalIgnoreCase) && d.IsReady)
+                ?? DriveInfo.GetDrives().FirstOrDefault(d => d.DriveType == DriveType.Fixed && d.IsReady);
             if (drive != null)
             {
                 diskFreeGb  = drive.AvailableFreeSpace / 1_073_741_824.0;
@@ -894,11 +948,43 @@ public sealed class PipeServerWorker : BackgroundService
 
     // ── Handlers de Limpeza ───────────────────────────────────────────────
 
+    private const uint SHERB_NOCONFIRMATION = 0x00000001;
+    private const uint SHERB_NOPROGRESSUI   = 0x00000002;
+    private const uint SHERB_NOSOUND        = 0x00000004;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SHQUERYRBINFO
+    {
+        public int cbSize;
+        public long i64Size;
+        public long i64NumItems;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHEmptyRecycleBinW(IntPtr hwnd, string? pszRootPath, uint dwFlags);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHQueryRecycleBinW(string? pszRootPath, ref SHQUERYRBINFO pSHQueryRBInfo);
+
+    private static readonly global::System.IO.EnumerationOptions SafeEnumRecursiveOptions = new()
+    {
+        IgnoreInaccessible    = true,
+        RecurseSubdirectories = true,
+        AttributesToSkip      = FileAttributes.ReparsePoint,
+    };
+
+    private static readonly global::System.IO.EnumerationOptions SafeEnumTopOptions = new()
+    {
+        IgnoreInaccessible    = true,
+        RecurseSubdirectories = false,
+        AttributesToSkip      = FileAttributes.ReparsePoint,
+    };
+
     private static readonly string[] _tempPaths =
     [
         Path.GetTempPath(),
-        @"C:\Windows\Temp",
-        @"C:\Windows\SoftwareDistribution\Download",
+        AppPaths.WindowsTempDir,
+        AppPaths.SoftwareDistributionDownloadDir,
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\Windows\INetCache"),
     ];
 
@@ -912,9 +998,13 @@ public sealed class PipeServerWorker : BackgroundService
                 if (!Directory.Exists(path)) continue;
                 try
                 {
-                    var files = Directory.GetFiles(path, "*", SearchOption.AllDirectories);
-                    long size  = files.Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } });
-                    categories.Add(new { path, fileCount = files.Length, sizeMb = Math.Round(size / 1_048_576.0, 1) });
+                    long size = 0;
+                    int count = 0;
+                    foreach (var fi in new DirectoryInfo(path).EnumerateFiles("*", SafeEnumRecursiveOptions))
+                    {
+                        try { size += fi.Length; count++; } catch { }
+                    }
+                    categories.Add(new { path, fileCount = count, sizeMb = Math.Round(size / 1_048_576.0, 1) });
                 }
                 catch { }
             }
@@ -936,54 +1026,85 @@ public sealed class PipeServerWorker : BackgroundService
 
         await Task.Run(() =>
         {
-            // ── temp: %TEMP% e C:\Windows\Temp ──────────────────────────────
-            if (ids.Contains("temp"))
+            Parallel.ForEach(ids, id =>
             {
-                var tempDirs = new[] { Path.GetTempPath(), @"C:\Windows\Temp" };
-                foreach (var dir in tempDirs)
-                    DeleteDir(dir, ref deletedBytes, ref deletedFiles);
-            }
+                long localBytes = 0;
+                int localFiles  = 0;
 
-            // ── prefetch: C:\Windows\Prefetch ───────────────────────────────
-            if (ids.Contains("prefetch"))
-                DeleteDir(@"C:\Windows\Prefetch", ref deletedBytes, ref deletedFiles);
-
-            // ── recycle: Esvaziar Lixeira via Shell ─────────────────────────
-            if (ids.Contains("recycle"))
-            {
-                try
+                switch (id.ToLowerInvariant())
                 {
-                    var psi = new Diag.ProcessStartInfo
-                    {
-                        FileName  = "powershell.exe",
-                        Arguments = "-NoProfile -Command \"Clear-RecycleBin -Force -ErrorAction SilentlyContinue\"",
-                        CreateNoWindow  = true,
-                        UseShellExecute = false,
-                    };
-                    using var proc = Diag.Process.Start(psi);
-                    proc?.WaitForExit(10_000);
-                }
-                catch { }
-            }
+                    // ── temp: %TEMP% e Windows\Temp ────────────────────────────────
+                    case "temp":
+                        foreach (var dir in new[] { Path.GetTempPath(), AppPaths.WindowsTempDir })
+                            DeleteDir(dir, ref localBytes, ref localFiles);
+                        break;
 
-            // ── winupdate: C:\Windows\SoftwareDistribution\Download ─────────
-            if (ids.Contains("winupdate"))
-                DeleteDir(@"C:\Windows\SoftwareDistribution\Download", ref deletedBytes, ref deletedFiles);
+                    // ── prefetch: Windows\Prefetch ─────────────────────────────────
+                    case "prefetch":
+                        DeleteDir(AppPaths.PrefetchDir, ref localBytes, ref localFiles);
+                        break;
 
-            // ── thumbnails: cache de miniaturas ─────────────────────────────
-            if (ids.Contains("thumbnails"))
-            {
-                var thumbDir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    @"Microsoft\Windows\Explorer");
-                if (Directory.Exists(thumbDir))
-                {
-                    foreach (var f in Directory.GetFiles(thumbDir, "thumbcache_*.db", SearchOption.TopDirectoryOnly))
-                    {
-                        try { var len = new FileInfo(f).Length; File.Delete(f); deletedBytes += len; deletedFiles++; } catch { }
-                    }
+                    // ── recycle: Esvaziar Lixeira via API nativa Shell32 ────────────
+                    case "recycle":
+                        try
+                        {
+                            var rbInfo = new SHQUERYRBINFO { cbSize = Marshal.SizeOf<SHQUERYRBINFO>() };
+                            long rbBytes = 0;
+                            int rbItems  = 0;
+                            if (SHQueryRecycleBinW(null, ref rbInfo) == 0)
+                            {
+                                rbBytes = Math.Max(0L, rbInfo.i64Size);
+                                rbItems = (int)Math.Clamp(rbInfo.i64NumItems, 0L, int.MaxValue);
+                            }
+
+                            int hr = SHEmptyRecycleBinW(
+                                IntPtr.Zero,
+                                null,
+                                SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND);
+
+                            if (hr == 0 && rbBytes > 0)
+                            {
+                                localBytes += rbBytes;
+                                localFiles += rbItems;
+                            }
+                        }
+                        catch { }
+                        break;
+
+                    // ── winupdate: Windows\SoftwareDistribution\Download ───────────
+                    case "winupdate":
+                        DeleteDir(AppPaths.SoftwareDistributionDownloadDir, ref localBytes, ref localFiles);
+                        break;
+
+                    // ── thumbnails: cache de miniaturas ─────────────────────────────
+                    case "thumbnails":
+                        var thumbDir = Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                            @"Microsoft\Windows\Explorer");
+                        if (Directory.Exists(thumbDir))
+                        {
+                            try
+                            {
+                                foreach (var fi in new DirectoryInfo(thumbDir).EnumerateFiles("thumbcache_*.db", SafeEnumTopOptions))
+                                {
+                                    try
+                                    {
+                                        var len = fi.Length;
+                                        fi.Delete();
+                                        localBytes += len;
+                                        localFiles++;
+                                    }
+                                    catch { }
+                                }
+                            }
+                            catch { }
+                        }
+                        break;
                 }
-            }
+
+                if (localBytes > 0) Interlocked.Add(ref deletedBytes, localBytes);
+                if (localFiles > 0) Interlocked.Add(ref deletedFiles, localFiles);
+            });
         });
 
         return new { deletedFiles, freedMb = Math.Round(deletedBytes / 1_048_576.0, 1), success = true };
@@ -993,15 +1114,14 @@ public sealed class PipeServerWorker : BackgroundService
     {
         if (!Directory.Exists(dir)) return;
 
-        // Deleta arquivos neste nível (TopDirectoryOnly para não quebrar em subpastas protegidas)
         try
         {
-            foreach (var f in Directory.GetFiles(dir, "*", SearchOption.TopDirectoryOnly))
+            foreach (var fi in new DirectoryInfo(dir).EnumerateFiles("*", SafeEnumRecursiveOptions))
             {
                 try
                 {
-                    var len = new FileInfo(f).Length;
-                    File.Delete(f);
+                    var len = fi.Length;
+                    fi.Delete();
                     bytes += len;
                     files++;
                 }
@@ -1009,17 +1129,6 @@ public sealed class PipeServerWorker : BackgroundService
             }
         }
         catch { /* pasta inacessível — pula completamente */ }
-
-        // Desce recursivamente, pulando subpastas protegidas individualmente
-        try
-        {
-            foreach (var sub in Directory.GetDirectories(dir, "*", SearchOption.TopDirectoryOnly))
-            {
-                try { DeleteDir(sub, ref bytes, ref files); }
-                catch { /* subpasta protegida — pula */ }
-            }
-        }
-        catch { /* sem permissão para listar subpastas — pula */ }
     }
 
     // ── Handlers de Inicialização ─────────────────────────────────────────
@@ -1029,30 +1138,106 @@ public sealed class PipeServerWorker : BackgroundService
         var items = new List<object>();
         await Task.Run(() =>
         {
-            var keys = new[]
+            // Pares (chave habilitada, chave desabilitada, escopo)
+            var keyPairs = new[]
             {
-                (@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", false),
-                (@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true),
+                (@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                 @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run-Disabled", false),
+                (@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                 @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run-Disabled", true),
             };
-            foreach (var (subKey, machine) in keys)
+
+            foreach (var (enabledKey, disabledKey, machine) in keyPairs)
             {
-                using var root = machine
-                    ? Microsoft.Win32.Registry.LocalMachine.OpenSubKey(subKey)
-                    : Microsoft.Win32.Registry.CurrentUser.OpenSubKey(subKey);
-                if (root == null) continue;
-                foreach (var name in root.GetValueNames())
+                var root = machine ? Microsoft.Win32.Registry.LocalMachine : Microsoft.Win32.Registry.CurrentUser;
+                var scope = machine ? "Machine" : "User";
+
+                // ── Itens habilitados ──
+                using var runKey = root.OpenSubKey(enabledKey);
+                if (runKey != null)
                 {
-                    items.Add(new
+                    foreach (var name in runKey.GetValueNames())
                     {
-                        name,
-                        command  = root.GetValue(name)?.ToString() ?? "",
-                        scope    = machine ? "Machine" : "User",
-                        enabled  = true,
-                    });
+                        var command = runKey.GetValue(name)?.ToString() ?? "";
+                        items.Add(BuildStartupItem(name, command, scope, enabled: true));
+                    }
+                }
+
+                // ── Itens desabilitados ──
+                using var disabledKeyHandle = root.OpenSubKey(disabledKey);
+                if (disabledKeyHandle != null)
+                {
+                    foreach (var name in disabledKeyHandle.GetValueNames())
+                    {
+                        var command = disabledKeyHandle.GetValue(name)?.ToString() ?? "";
+                        items.Add(BuildStartupItem(name, command, scope, enabled: false));
+                    }
                 }
             }
         });
         return items.OrderBy(x => ((dynamic)x).name);
+    }
+
+    /// <summary>
+    /// Constrói um item de inicialização extraindo o caminho do executável,
+    /// publisher (FileVersionInfo) e impacto estimado (baseado no tamanho do arquivo).
+    /// </summary>
+    private static object BuildStartupItem(string name, string command, string scope, bool enabled)
+    {
+        // Extrair caminho do executável da linha de comando (pode ter aspas e argumentos)
+        string? exePath = null;
+        try
+        {
+            if (command.StartsWith("\""))
+            {
+                var end = command.IndexOf('"', 1);
+                exePath = end > 1 ? command[1..end] : null;
+            }
+            else
+            {
+                exePath = command.Split(' ')[0];
+            }
+        }
+        catch { }
+
+        // Publisher (Fornecedor)
+        string publisher = "";
+        if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
+        {
+            try
+            {
+                var fvi = Diag.FileVersionInfo.GetVersionInfo(exePath);
+                publisher = fvi.CompanyName ?? fvi.LegalCopyright ?? "";
+            }
+            catch { }
+        }
+
+        // Impacto na inicialização (estimado pelo tamanho do executável)
+        string startupImpact = "Nenhum";
+        if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
+        {
+            try
+            {
+                var sizeMb = new FileInfo(exePath).Length / 1_048_576.0;
+                startupImpact = sizeMb switch
+                {
+                    > 100 => "Alto",
+                    > 20  => "Médio",
+                    _     => "Baixo",
+                };
+            }
+            catch { }
+        }
+
+        return new
+        {
+            name,
+            command,
+            scope,
+            enabled,
+            publisher,
+            startupImpact,
+        };
     }
 
     private static async Task<object> HandleStartupToggleAsync(JsonElement payload)
@@ -1316,7 +1501,9 @@ public sealed class PipeServerWorker : BackgroundService
 
     // ── Fase 16: Backup ───────────────────────────────────────────────────────
 
-    private static string BackupDir => Path.Combine(AppContext.BaseDirectory, "..", "..", "backups");
+    private static string RepoRoot => AppPaths.DataRoot;
+
+    private static string BackupDir => AppPaths.BackupsDir;
 
     private static object GetBackupList()
     {
@@ -1373,9 +1560,16 @@ public sealed class PipeServerWorker : BackgroundService
     {
         var path = payload.TryGetProperty("path", out var p) ? p.GetString() : throw new Exception("path obrigatório");
         if (!File.Exists(path)) throw new Exception($"Arquivo não encontrado: {path}");
-        if (path!.EndsWith(".reg", StringComparison.OrdinalIgnoreCase))
+
+        // Prevenção de path traversal: exige que o arquivo esteja dentro de BackupDir
+        var resolvedPath = Path.GetFullPath(path!);
+        var backupRoot   = Path.GetFullPath(BackupDir);
+        if (!resolvedPath.StartsWith(backupRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new Exception("Caminho inválido.");
+
+        if (resolvedPath.EndsWith(".reg", StringComparison.OrdinalIgnoreCase))
         {
-            var (exit, _, err) = await RunProcessAsync("reg.exe", $"import \"{path}\"");
+            var (exit, _, err) = await RunProcessAsync("reg.exe", $"import \"{resolvedPath}\"");
             if (exit != 0) throw new Exception($"Falha na restauração: {err}");
         }
         await Task.CompletedTask;
@@ -1385,7 +1579,14 @@ public sealed class PipeServerWorker : BackgroundService
     private static object HandleBackupDelete(JsonElement payload)
     {
         var path = payload.TryGetProperty("path", out var p) ? p.GetString() : throw new Exception("path obrigatório");
-        if (File.Exists(path)) File.Delete(path!);
+
+        // Prevenção de path traversal
+        var resolvedPath = Path.GetFullPath(path!);
+        var backupRoot   = Path.GetFullPath(BackupDir);
+        if (!resolvedPath.StartsWith(backupRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new Exception("Caminho inválido.");
+
+        if (File.Exists(resolvedPath)) File.Delete(resolvedPath);
         return new { success = true, message = "Backup excluído." };
     }
 
@@ -1394,13 +1595,37 @@ public sealed class PipeServerWorker : BackgroundService
     private static async Task<object> HandleLogsReadAsync(JsonElement payload)
     {
         var file    = payload.TryGetProperty("file", out var f) ? f.GetString() : "launcher";
-        var logsDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "logs");
+        if (string.IsNullOrWhiteSpace(file) || !Regex.IsMatch(file, @"^[\w\-]+$"))
+            file = "launcher";
+
+        var logsDir = AppPaths.LogsDir;
         var logPath = Path.Combine(logsDir, $"{file}.log");
 
-        if (!File.Exists(logPath))
-            return new { content = $"[Arquivo não encontrado: {file}.log]", lines = 0 };
+        // Se pediu "backend" e backend.log estiver vazio ou inexistente, usar o log mais recente do Serilog (aer-*.log)
+        if (string.Equals(file, "backend", StringComparison.OrdinalIgnoreCase) &&
+            (!File.Exists(logPath) || new FileInfo(logPath).Length == 0) &&
+            Directory.Exists(logsDir))
+        {
+            var latestAerLog = new DirectoryInfo(logsDir)
+                .GetFiles("aer-*.log")
+                .OrderByDescending(fi => fi.LastWriteTimeUtc)
+                .FirstOrDefault();
+            if (latestAerLog != null)
+                logPath = latestAerLog.FullName;
+        }
 
-        var lines   = await File.ReadAllLinesAsync(logPath);
+        if (!File.Exists(logPath))
+            return new { content = $"[Arquivo vazio ou não encontrado: {file}.log]", lines = 0, file = $"{file}.log", sizeKb = 0.0 };
+
+        var allLines = new List<string>();
+        await using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        using (var sr = new StreamReader(fs, Encoding.UTF8))
+        {
+            while (await sr.ReadLineAsync() is { } line)
+                allLines.Add(line);
+        }
+
+        var lines   = allLines.ToArray();
         var last200 = lines.Length > 200 ? lines[^200..] : lines;
         return new {
             content  = string.Join("\n", last200),
@@ -1427,28 +1652,33 @@ public sealed class PipeServerWorker : BackgroundService
 
     // ── Fase 19: Biblioteca de Software ──────────────────────────────────────
 
-    private static string LibraryFile => Path.Combine(AppContext.BaseDirectory, "..", "..", "library.json");
+    private static string LibraryFile => AppPaths.LibraryFile;
 
+    private static readonly object _libraryLock = new();
     private static List<JsonElement> _libraryCache = new();
     private static bool _libraryLoaded = false;
 
     private static List<JsonElement> LoadLibrary()
     {
-        if (_libraryLoaded) return _libraryCache;
-        if (!File.Exists(LibraryFile))
+        lock (_libraryLock)
         {
+            if (_libraryLoaded) return _libraryCache;
+            if (!File.Exists(LibraryFile))
+            {
+                _libraryLoaded = true;
+                _libraryCache  = new List<JsonElement>();
+                return _libraryCache;
+            }
+            var json = File.ReadAllText(LibraryFile);
+            _libraryCache  = JsonSerializer.Deserialize<List<JsonElement>>(json) ?? new();
             _libraryLoaded = true;
-            _libraryCache  = new List<JsonElement>();
             return _libraryCache;
         }
-        var json = File.ReadAllText(LibraryFile);
-        _libraryCache  = JsonSerializer.Deserialize<List<JsonElement>>(json) ?? new();
-        _libraryLoaded = true;
-        return _libraryCache;
     }
 
     private static void SaveLibrary()
     {
+        // Chamado sempre dentro de _libraryLock
         Directory.CreateDirectory(Path.GetDirectoryName(LibraryFile)!);
         File.WriteAllText(LibraryFile, JsonSerializer.Serialize(_libraryCache, JsonOptions));
     }
@@ -1461,25 +1691,29 @@ public sealed class PipeServerWorker : BackgroundService
 
     private static object HandleLibraryAdd(JsonElement payload)
     {
-        LoadLibrary();
-        _libraryCache.Add(payload);
-        SaveLibrary();
-        _libraryLoaded = false; // força reload
-        return new { success = true, count = _libraryCache.Count };
+        lock (_libraryLock)
+        {
+            LoadLibrary();
+            _libraryCache.Add(payload);
+            SaveLibrary();
+            return new { success = true, count = _libraryCache.Count };
+        }
     }
 
     private static object HandleLibraryRemove(JsonElement payload)
     {
         var id = payload.TryGetProperty("id", out var i) ? i.GetString() : null;
-        LoadLibrary();
-        _libraryCache = _libraryCache.Where(item =>
+        lock (_libraryLock)
         {
-            item.TryGetProperty("id", out var itemId);
-            return itemId.GetString() != id;
-        }).ToList();
-        SaveLibrary();
-        _libraryLoaded = false;
-        return new { success = true };
+            LoadLibrary();
+            _libraryCache = _libraryCache.Where(item =>
+            {
+                item.TryGetProperty("id", out var itemId);
+                return itemId.GetString() != id;
+            }).ToList();
+            SaveLibrary();
+            return new { success = true };
+        }
     }
 
     private static async Task<object> HandleLibraryInstallAsync(JsonElement payload)
@@ -1662,16 +1896,123 @@ public sealed class PipeServerWorker : BackgroundService
         return new { success, message, programs = success ? _programs.GetAll() : null };
     }
 
+    // ── Permissão de Administrador e Elevação ────────────────────────────
+
+    private static bool IsRunningAsAdmin()
+    {
+        try
+        {
+            using var identity = global::System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new global::System.Security.Principal.WindowsPrincipal(identity);
+            return principal.IsInRole(global::System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch { return false; }
+    }
+
+    private object HandleSystemElevate()
+    {
+        if (IsRunningAsAdmin())
+        {
+            return new
+            {
+                success      = true,
+                alreadyAdmin = true,
+                isAdmin      = true,
+                message      = "O backend já está executando como Administrador."
+            };
+        }
+
+        try
+        {
+            var exePath = Path.Combine(AppContext.BaseDirectory, "AeR.Api.exe");
+            if (!File.Exists(exePath))
+                exePath = Environment.ProcessPath ?? "AeR.Api.exe";
+
+            var psi = new Diag.ProcessStartInfo
+            {
+                FileName         = exePath,
+                WorkingDirectory = AppContext.BaseDirectory,
+                UseShellExecute  = true,
+                Verb             = "runas",
+                WindowStyle      = Diag.ProcessWindowStyle.Hidden,
+            };
+
+            var proc = Diag.Process.Start(psi);
+            if (proc == null)
+                return new { success = false, isAdmin = false, message = "Não foi possível iniciar o processo elevado." };
+
+            _logger.LogInformation("Processo elevado AeR.Api iniciado (PID {Pid}). Encerrando instância atual não-elevada...", proc.Id);
+
+            // Encerrar esta instância não-elevada após enviar a resposta pelo pipe
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(350);
+                _lifetime.StopApplication();
+                await Task.Delay(600);
+                Environment.Exit(0);
+            });
+
+            return new
+            {
+                success  = true,
+                elevated = true,
+                isAdmin  = true,
+                message  = "Backend elevado como Administrador! Reconectando..."
+            };
+        }
+        catch (global::System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            // Error 1223 = ERROR_CANCELLED (usuário recusou o prompt UAC)
+            return new
+            {
+                success   = false,
+                cancelled = true,
+                isAdmin   = false,
+                message   = "Solicitação de Administrador cancelada pelo usuário (UAC)."
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Falha ao elevar backend AeR.Api.");
+            return new
+            {
+                success = false,
+                isAdmin = false,
+                message = $"Erro ao solicitar Administrador: {ex.Message}"
+            };
+        }
+    }
+
     // ── Factory do Pipe ──────────────────────────────────────────────────
 
-    private static NamedPipeServerStream CreatePipeServer() =>
-        new(
+    private static NamedPipeServerStream CreatePipeServer()
+    {
+        var pipeSecurity = new PipeSecurity();
+        pipeSecurity.AddAccessRule(new PipeAccessRule(
+            new global::System.Security.Principal.SecurityIdentifier(
+                global::System.Security.Principal.WellKnownSidType.AuthenticatedUserSid, null),
+            PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
+            global::System.Security.AccessControl.AccessControlType.Allow));
+        pipeSecurity.AddAccessRule(new PipeAccessRule(
+            new global::System.Security.Principal.SecurityIdentifier(
+                global::System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null),
+            PipeAccessRights.FullControl,
+            global::System.Security.AccessControl.AccessControlType.Allow));
+        pipeSecurity.AddAccessRule(new PipeAccessRule(
+            new global::System.Security.Principal.SecurityIdentifier(
+                global::System.Security.Principal.WellKnownSidType.LocalSystemSid, null),
+            PipeAccessRights.FullControl,
+            global::System.Security.AccessControl.AccessControlType.Allow));
+
+        return NamedPipeServerStreamAcl.Create(
             pipeName                  : PipeName,
             direction                 : PipeDirection.InOut,
             maxNumberOfServerInstances: NamedPipeServerStream.MaxAllowedServerInstances,
             transmissionMode          : PipeTransmissionMode.Byte,
             options                   : PipeOptions.Asynchronous | PipeOptions.WriteThrough,
             inBufferSize              : 8192,
-            outBufferSize             : 65536   // Buffer maior para JSON de métricas
+            outBufferSize             : 65536,  // Buffer maior para JSON de métricas
+            pipeSecurity              : pipeSecurity
         );
+    }
 }

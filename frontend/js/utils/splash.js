@@ -11,15 +11,24 @@
 
   if (!bar || !status) return; // splash não existe
 
+  /**
+   * Número pseudo-aleatório para uso EXCLUSIVAMENTE visual (posição e temporização
+   * de partículas decorativas da splash screen). Não criptográfico.
+   * @returns {number} valor em [0, 1)
+   */
+  function visualRand() {
+    return Math.random();
+  }
+
   // Gerar partículas flutuantes
   for (var i = 0; i < 18; i++) {
     var p = document.createElement('div');
     p.className = 'splash-particle';
-    p.style.left             = (Math.random() * 100) + '%';
-    p.style.animationDuration = (4 + Math.random() * 8) + 's';
-    p.style.animationDelay   = (Math.random() * 6) + 's';
-    p.style.setProperty('--drift', ((Math.random() - 0.5) * 80) + 'px');
-    p.style.opacity          = String(0.3 + Math.random() * 0.7);
+    p.style.left              = (visualRand() * 100) + '%';        // posição horizontal
+    p.style.animationDuration = (4 + visualRand() * 8) + 's';     // duração da animação
+    p.style.animationDelay    = (visualRand() * 6) + 's';         // delay da animação
+    p.style.setProperty('--drift', ((visualRand() - 0.5) * 80) + 'px'); // deriva horizontal
+    p.style.opacity           = String(0.3 + visualRand() * 0.7); // opacidade visual
     if (pCont) pCont.appendChild(p);
   }
 

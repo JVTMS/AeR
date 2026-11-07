@@ -20,9 +20,14 @@ const cpuHistory  = [];
 const ramHistory  = [];
 const gpuHistory  = [];
 
-// ── Mock fallback ─────────────────────────────────────────────────────────
-const r  = (min, max) => Math.random() * (max - min) + min;
-const ri = (min, max) => Math.floor(r(min, max));
+// ── Mock fallback — pseudo-aleatoriedade EXCLUSIVAMENTE para dados visuais de demonstração ─────
+// Não criptográfico: simula métricas de dashboard enquanto o backend está offline.
+// Não usar para tokens, autenticação ou qualquer contexto de segurança.
+const mockRand  = (min, max) => Math.random() * (max - min) + min;
+const mockRandI = (min, max) => Math.floor(mockRand(min, max));
+// Aliases curtos internos ao módulo (uso: ri/r nas funções de mock abaixo)
+const r  = mockRand;
+const ri = mockRandI;
 
 // ── Estado da fonte de dados ──────────────────────────────────────────────
 let usingRealData = false;
@@ -591,41 +596,83 @@ function applyRealProcesses(procs) {
     return 'hsl(145,60%,55%)';
   };
 
-  tbody.innerHTML = procs.map(p => `
-    <tr>
-      <td class="proc-name">${(p.name ?? '--')}</td>
-      <td class="proc-pid">${p.pid ?? '--'}</td>
-      <td class="proc-cpu" style="color:${cpuColor(p.cpuPercent ?? 0)}">${(p.cpuPercent ?? 0).toFixed(1)}%</td>
-      <td class="proc-ram">${(p.memoryMB ?? 0).toFixed(0)} MB</td>
-    </tr>
-  `).join('');
+  // Constrói linhas via DOM — p.name pode conter caracteres HTML; textContent é seguro.
+  tbody.textContent = '';
+  procs.forEach(p => {
+    const tr = document.createElement('tr');
+
+    const tdName = document.createElement('td');
+    tdName.className = 'proc-name';
+    tdName.textContent = p.name ?? '--';
+
+    const tdPid = document.createElement('td');
+    tdPid.className = 'proc-pid';
+    tdPid.textContent = String(p.pid ?? '--');
+
+    const tdCpu = document.createElement('td');
+    tdCpu.className = 'proc-cpu';
+    tdCpu.style.color = cpuColor(p.cpuPercent ?? 0);
+    tdCpu.textContent = `${(p.cpuPercent ?? 0).toFixed(1)}%`;
+
+    const tdRam = document.createElement('td');
+    tdRam.className = 'proc-ram';
+    tdRam.textContent = `${(p.memoryMB ?? 0).toFixed(0)} MB`;
+
+    tr.appendChild(tdName);
+    tr.appendChild(tdPid);
+    tr.appendChild(tdCpu);
+    tr.appendChild(tdRam);
+    tbody.appendChild(tr);
+  });
 }
 
 /** Renderiza alertas dinâmicos vindos do backend. */
 function applyAlerts(alerts) {
-  const list = document.getElementById('alerts-list');
+  const list  = document.getElementById('alerts-list');
   const badge = document.getElementById('alert-count');
   if (!list) return;
 
   if (!alerts || alerts.length === 0) return;
 
-  const iconMap = { error: '🔴', warn: '⚠️', info: '🔵', ok: '✅' };
+  const iconMap  = { error: '🔴', warn: '⚠️', info: '🔵', ok: '✅' };
   const classMap = {
     error: 'alert-item--warn',
     warn:  'alert-item--warn',
     info:  'alert-item--info',
     ok:    'alert-item--ok',
   };
+  // Conjunto de classes permitidas — evita injeção via a.level
+  const allowedClasses = new Set(Object.values(classMap));
 
-  list.innerHTML = alerts.map(a => `
-    <div class="alert-item ${classMap[a.level] ?? 'alert-item--info'}">
-      <div class="alert-icon">${iconMap[a.level] ?? 'ℹ️'}</div>
-      <div class="alert-body">
-        <div class="alert-msg">${a.message ?? ''}</div>
-        <div class="alert-time">${a.time ?? 'Agora'}</div>
-      </div>
-    </div>
-  `).join('');
+  // Constrói alertas via DOM — a.message e a.time vêm do backend e são tratados como texto.
+  list.textContent = '';
+  alerts.forEach(a => {
+    const safeClass = allowedClasses.has(classMap[a.level]) ? classMap[a.level] : 'alert-item--info';
+
+    const item = document.createElement('div');
+    item.className = `alert-item ${safeClass}`;
+
+    const iconEl = document.createElement('div');
+    iconEl.className = 'alert-icon';
+    iconEl.textContent = iconMap[a.level] ?? 'ℹ️';
+
+    const body = document.createElement('div');
+    body.className = 'alert-body';
+
+    const msg = document.createElement('div');
+    msg.className = 'alert-msg';
+    msg.textContent = a.message ?? '';        // textContent — nunca innerHTML
+
+    const timeEl = document.createElement('div');
+    timeEl.className = 'alert-time';
+    timeEl.textContent = a.time ?? 'Agora';   // textContent — nunca innerHTML
+
+    body.appendChild(msg);
+    body.appendChild(timeEl);
+    item.appendChild(iconEl);
+    item.appendChild(body);
+    list.appendChild(item);
+  });
 
   if (badge) {
     const warnCount = alerts.filter(a => a.level === 'warn' || a.level === 'error').length;
@@ -686,30 +733,61 @@ function updateScoreDetail(detail) {
   if (!barsEl || !detail) return;
 
   const components = [
-    { label: '🖥 CPU',      score: detail.cpuScore     ?? 100 },
-    { label: '🧠 RAM',      score: detail.ramScore     ?? 100 },
-    { label: '💾 Disco',    score: detail.diskScore    ?? 100 },
-    { label: '🎮 GPU',      score: detail.gpuScore     ?? 100 },
-    { label: '🌡 Térmica',  score: detail.thermalScore ?? 100 },
+    { label: '🖥 CPU',     score: detail.cpuScore     ?? 100 },
+    { label: '🧠 RAM',     score: detail.ramScore     ?? 100 },
+    { label: '💾 Disco',   score: detail.diskScore    ?? 100 },
+    { label: '🎮 GPU',     score: detail.gpuScore     ?? 100 },
+    { label: '🌡 Térmica', score: detail.thermalScore ?? 100 },
   ];
 
   const barColor = (s) => s >= 75 ? '#00ff88' : s >= 50 ? '#f39c12' : '#ff3b30';
 
-  barsEl.innerHTML = components.map(c => `
-    <div class="sdp-bar-row">
-      <span class="sdp-bar-label">${c.label}</span>
-      <div class="sdp-bar-track">
-        <div class="sdp-bar-fill" style="width:${c.score}%;background:${barColor(c.score)}"></div>
-      </div>
-      <span class="sdp-bar-val" style="color:${barColor(c.score)}">${c.score}</span>
-    </div>
-  `).join('');
+  // Barras de score — labels hardcoded (seguros), scores são numéricos (seguros).
+  barsEl.textContent = '';
+  components.forEach(c => {
+    const row = document.createElement('div');
+    row.className = 'sdp-bar-row';
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'sdp-bar-label';
+    labelEl.textContent = c.label;           // hardcoded — seguro
+
+    const track = document.createElement('div');
+    track.className = 'sdp-bar-track';
+
+    const fill = document.createElement('div');
+    fill.className = 'sdp-bar-fill';
+    fill.style.width      = `${Number(c.score)}%`; // Number() garante que é numérico
+    fill.style.background = barColor(c.score);
+
+    track.appendChild(fill);
+
+    const val = document.createElement('span');
+    val.className  = 'sdp-bar-val';
+    val.style.color = barColor(c.score);
+    val.textContent = String(c.score);       // numérico — seguro
+
+    row.appendChild(labelEl);
+    row.appendChild(track);
+    row.appendChild(val);
+    barsEl.appendChild(row);
+  });
 
   if (tipsEl && Array.isArray(detail.tips)) {
-    tipsEl.innerHTML = `
-      <div class="sdp-tips-title">💡 Recomendações</div>
-      ${detail.tips.map(t => `<div class="sdp-tip">• ${t}</div>`).join('')}
-    `;
+    // Tips vêm do backend — usar textContent, nunca innerHTML.
+    tipsEl.textContent = '';
+
+    const title = document.createElement('div');
+    title.className = 'sdp-tips-title';
+    title.textContent = '💡 Recomendações';
+    tipsEl.appendChild(title);
+
+    detail.tips.forEach(t => {
+      const tip = document.createElement('div');
+      tip.className = 'sdp-tip';
+      tip.textContent = `• ${t}`;            // textContent — sem risco de XSS
+      tipsEl.appendChild(tip);
+    });
   }
 }
 
@@ -748,13 +826,15 @@ function injectDashboardStyles() {
     .dash-title { font-size: 22px; font-weight: 700; color: hsl(210,20%,94%); }
     .dash-subtitle { font-size: 12px; color: hsl(210,12%,48%); margin-top: 3px; }
 
-    /* Ring Grid */
+    /* Ring Grid Responsivo */
     .ring-grid {
       display: grid;
       grid-template-columns: repeat(6, 1fr);
       gap: 12px;
     }
-    @media (max-width: 1100px) { .ring-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 1240px) { .ring-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 680px)  { .ring-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 440px)  { .ring-grid { grid-template-columns: 1fr; } }
 
     .ring-card {
       background: hsl(228,18%,13%);
@@ -881,13 +961,20 @@ function injectDashboardStyles() {
       position: relative;
     }
 
-    /* Bottom 3 cols */
+    /* Bottom 3 cols Responsivo */
     .dash-bottom {
       display: grid;
-      grid-template-columns: 1.2fr 1fr 1fr;
+      grid-template-columns: 1.3fr 1fr 1fr;
       gap: 12px;
     }
-    @media (max-width: 900px) { .dash-bottom { grid-template-columns: 1fr; } }
+    @media (max-width: 1160px) {
+      .dash-bottom { grid-template-columns: 1fr 1fr; }
+      .dash-bottom > .dash-panel:first-child { grid-column: 1 / -1; }
+    }
+    @media (max-width: 820px) {
+      .dash-bottom { grid-template-columns: 1fr; }
+      .dash-bottom > .dash-panel:first-child { grid-column: auto; }
+    }
 
     .dash-panel {
       background: hsl(228,18%,13%);

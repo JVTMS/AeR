@@ -13,28 +13,36 @@
   background: hsl(230, 20%, 8%);
   border-bottom: 1px solid hsla(215, 20%, 20%, 0.6);
   -webkit-app-region: drag;
+  user-select: none;
   padding: 0;
   gap: 0;
 }
 
+/* Quando maximizado no Windows, ajusta compensação para bordas DWM */
+body.is-maximized .titlebar {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
 .titlebar__drag {
-  position: absolute;
-  inset: 0;
-  -webkit-app-region: drag;
-  pointer-events: none;
+  display: none;
 }
 
 .titlebar__left {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 14px;
-  min-width: 220px;
-  -webkit-app-region: no-drag;
+  padding: 0 10px;
   flex-shrink: 0;
+  /* Arrastável: Não aplicar no-drag aqui! Apenas botões clicáveis */
 }
 
-.titlebar__logo { font-size: 14px; }
+.titlebar__sidebar-toggle {
+  -webkit-app-region: no-drag;
+  margin-right: 2px;
+}
+
+.titlebar__logo { font-size: 14px; pointer-events: none; }
 
 .titlebar__name {
   font-size: 13px;
@@ -44,6 +52,7 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  pointer-events: none;
 }
 
 .titlebar__ver {
@@ -53,6 +62,7 @@
   background: hsla(215,20%,18%,0.8);
   padding: 1px 6px;
   border-radius: 10px;
+  pointer-events: none;
 }
 
 .titlebar__center {
@@ -60,7 +70,9 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  -webkit-app-region: no-drag;
+  padding: 0 8px;
+  min-width: 0;
+  /* ARRASTÁVEL: Todo o centro é área de arraste da janela */
 }
 
 .topbar-search {
@@ -71,8 +83,11 @@
   border: 1px solid hsla(215, 20%, 25%, 0.5);
   border-radius: 8px;
   padding: 5px 12px;
-  width: 280px;
-  transition: border-color 200ms;
+  width: 100%;
+  max-width: 280px;
+  min-width: 120px;
+  transition: border-color 200ms, max-width 200ms;
+  -webkit-app-region: no-drag; /* Somente a busca é no-drag */
 }
 
 .topbar-search:focus-within {
@@ -98,11 +113,10 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 8px 0 14px;
-  min-width: 220px;
+  padding: 0 4px 0 8px;
   justify-content: flex-end;
-  -webkit-app-region: no-drag;
   flex-shrink: 0;
+  /* Espaço entre botões permanece arrastável */
 }
 
 .status-chip {
@@ -115,7 +129,9 @@
   padding: 3px 10px;
   font-size: 11px;
   color: hsl(145, 60%, 60%);
-  margin-right: 6px;
+  margin-right: 4px;
+  -webkit-app-region: no-drag;
+  cursor: default;
 }
 
 .status-chip__dot {
@@ -123,6 +139,7 @@
   border-radius: 50%;
   background: hsl(145, 70%, 55%);
   box-shadow: 0 0 6px hsl(145, 70%, 55%);
+  flex-shrink: 0;
 }
 
 .status-chip--offline { background: hsla(355,60%,40%,0.15); border-color: hsla(355,60%,50%,0.3); color: hsl(355,60%,60%); }
@@ -135,25 +152,34 @@
   color: hsl(210,12%,50%);
   transition: all 150ms;
   background: none; border: none; cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 .titlebar__icon-btn:hover { color: hsl(210,20%,90%); background: hsla(215,20%,18%,0.8); }
 
 .titlebar__winbtns {
   display: flex;
-  margin-left: 6px;
-  gap: 2px;
+  margin-left: 4px;
+  gap: 1px;
+  -webkit-app-region: no-drag;
 }
 
 .titlebar__btn {
   display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px;
+  width: 32px; height: 28px;
   border-radius: 4px;
   color: hsl(210,12%,50%);
   transition: all 150ms;
   background: none; border: none; cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 .titlebar__btn:hover { color: hsl(210,20%,90%); background: hsla(215,20%,20%,0.8); }
 .titlebar__btn--close:hover { background: hsl(355,70%,50%); color: white; }
+
+/* Alternância de ícones de Maximizar/Restaurar e Tela Cheia */
+body.is-maximized #btn-maximize .icon-max { display: none; }
+body.is-maximized #btn-maximize .icon-restore { display: block; }
+body.is-fullscreen #btn-fullscreen .icon-fs-enter { display: none; }
+body.is-fullscreen #btn-fullscreen .icon-fs-exit { display: block; }
 
 /* ── Shell Layout ─────────────────────────────────────────────────────── */
 .shell {
@@ -161,6 +187,7 @@
   height: 100vh;
   padding-top: 36px;
   overflow: hidden;
+  min-width: 0;
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────────────── */
@@ -173,6 +200,39 @@
   background: hsl(230, 18%, 9%);
   border-right: 1px solid hsla(215, 20%, 16%, 0.8);
   overflow: hidden;
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1), min-width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+/* Modo compacto / recolhido da sidebar */
+.sidebar.sidebar--collapsed {
+  width: 58px;
+  min-width: 58px;
+}
+
+.sidebar.sidebar--collapsed .sidebar__logo-name,
+.sidebar.sidebar--collapsed .sidebar__logo-sub,
+.sidebar.sidebar--collapsed .nav-group-label,
+.sidebar.sidebar--collapsed .sidebar__footer {
+  display: none !important;
+}
+
+.sidebar.sidebar--collapsed .sidebar__logo {
+  justify-content: center;
+  padding: 14px 0 10px;
+}
+
+.sidebar.sidebar--collapsed .nav-item {
+  justify-content: center;
+  padding: 9px 0;
+  gap: 0;
+  font-size: 0;
+}
+
+.sidebar.sidebar--collapsed .nav-item__icon {
+  margin: 0;
+  font-size: 15px;
 }
 
 .sidebar__logo {
@@ -284,9 +344,10 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 20px 22px;
+  padding: clamp(12px, 2vw, 22px);
   scrollbar-width: thin;
   scrollbar-color: hsla(215,20%,22%,0.6) transparent;
+  min-width: 0;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */
@@ -294,3 +355,16 @@
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: hsla(215,20%,25%,0.6); border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: hsla(215,20%,35%,0.8); }
+
+/* ── Breakpoints Responsivos ───────────────────────────────────────────── */
+@media (max-width: 880px) {
+  .titlebar__ver { display: none; }
+  .status-chip__label { display: none; }
+  .status-chip { padding: 4px 6px; margin-right: 2px; }
+  .topbar-search { max-width: 190px; }
+}
+
+@media (max-width: 700px) {
+  .topbar-search { max-width: 140px; }
+  .titlebar__icon-btn[aria-label="Ajuda"] { display: none; }
+}

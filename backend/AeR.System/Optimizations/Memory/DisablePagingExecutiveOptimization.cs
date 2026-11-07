@@ -1,4 +1,4 @@
-﻿using AeR.System.Abstractions;
+using AeR.System.Abstractions;
 using AeR.System.Models;
 namespace AeR.System.Optimizations.Memory;
 public sealed class DisablePagingExecutiveOptimization : OptimizationBase
@@ -8,7 +8,7 @@ public sealed class DisablePagingExecutiveOptimization : OptimizationBase
     public override string Id          => "memory.paging-executive";
     public override string Name        => "Manter Kernel na RAM (Sem Paginacao)";
     public override string Description => "Forca o kernel e drivers do Windows a ficarem na RAM fisica, evitando que sejam movidos para o pagefile.";
-    public override string Category    => "Memoria";
+    public override string Category    => "Memória";
     public override OptimizationMode Mode   => OptimizationMode.Both;
     public override RiskLevel         Risk   => RiskLevel.Safe;
     public override BackupStrategy    Backup => BackupStrategy.RegistryKey;

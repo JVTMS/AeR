@@ -1,4 +1,4 @@
-﻿using AeR.System.Abstractions;
+using AeR.System.Abstractions;
 using AeR.System.Models;
 namespace AeR.System.Optimizations.Services;
 public sealed class DisableWindowsSearchOptimization : OptimizationBase
@@ -7,7 +7,7 @@ public sealed class DisableWindowsSearchOptimization : OptimizationBase
     public override string Id          => "services.disable-search";
     public override string Name        => "Desativar Windows Search (Indexacao)";
     public override string Description => "Para o servico de indexacao de arquivos que usa CPU e disco constantemente em segundo plano.";
-    public override string Category    => "Servicos";
+    public override string Category    => "Serviços";
     public override OptimizationMode Mode   => OptimizationMode.Both;
     public override RiskLevel         Risk   => RiskLevel.Moderate;
     public override BackupStrategy    Backup => BackupStrategy.ServiceState;

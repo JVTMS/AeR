@@ -1,4 +1,4 @@
-﻿using AeR.System.Abstractions;
+using AeR.System.Abstractions;
 using AeR.System.Models;
 namespace AeR.System.Optimizations.Gpu;
 public sealed class NvidiaKBoostOptimization : OptimizationBase
@@ -30,10 +30,14 @@ public sealed class NvidiaKBoostOptimization : OptimizationBase
             if (baseKey == null) return false;
             foreach (var sub in baseKey.GetSubKeyNames())
             {
-                using var subKey = baseKey.OpenSubKey(sub);
-                var desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
-                if (desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase))
-                    return subKey?.GetValue("DisableDynamicPstate") is int v && v == 1;
+                try
+                {
+                    using var subKey = baseKey.OpenSubKey(sub);
+                    var desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
+                    if (desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase))
+                        return subKey?.GetValue("DisableDynamicPstate") is int v && v == 1;
+                }
+                catch { }
             }
         }
         catch { }
@@ -41,14 +45,54 @@ public sealed class NvidiaKBoostOptimization : OptimizationBase
     }
     public override async Task<OptimizationResult> ApplyAsync(CancellationToken ct)
     {
-        var script = @"Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}' -ErrorAction SilentlyContinue | Where-Object { try { (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DriverDesc -match 'NVIDIA' } catch { $false } } | ForEach-Object { Set-ItemProperty $_.PSPath -Name 'DisableDynamicPstate' -Value 1 -Type DWord -Force }";
-        var (exit, _, err) = await RunPowerShellAsync(script, ct);
-        return exit == 0 ? OptimizationResult.Ok("NVIDIA KBoost ativado - GPU travada na frequencia maxima.") : OptimizationResult.Fail("Falha.", err);
+        using var baseKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(RegPath);
+        if (baseKey == null)
+            return OptimizationResult.Fail("Chave de classe de GPU não encontrada.");
+
+        int applied = 0;
+        foreach (var sub in baseKey.GetSubKeyNames())
+        {
+            if (!sub.StartsWith('0')) continue;
+            string desc = "";
+            try
+            {
+                using var subKey = baseKey.OpenSubKey(sub);
+                desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
+            }
+            catch { continue; }
+
+            if (!desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var (exit, _, err) = await RunProcessAsync("reg.exe", $@"add ""HKLM\{RegPath}\{sub}"" /v DisableDynamicPstate /t REG_DWORD /d 1 /f", ct);
+            if (exit != 0)
+                return OptimizationResult.Fail("Falha ao ativar NVIDIA KBoost.", err);
+            applied++;
+        }
+
+        return applied > 0
+            ? OptimizationResult.Ok("NVIDIA KBoost ativado - GPU travada na frequência máxima.")
+            : OptimizationResult.Fail("Adaptador NVIDIA não encontrado no registro.");
     }
     public override async Task<OptimizationResult> RevertAsync(CancellationToken ct)
     {
-        var script = @"Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}' -ErrorAction SilentlyContinue | Where-Object { try { (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DriverDesc -match 'NVIDIA' } catch { $false } } | ForEach-Object { Remove-ItemProperty $_.PSPath -Name 'DisableDynamicPstate' -ErrorAction SilentlyContinue }";
-        await RunPowerShellAsync(script, ct);
-        return OptimizationResult.Ok("NVIDIA voltou ao modo de boost dinamico.");
+        using var baseKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(RegPath);
+        if (baseKey != null)
+        {
+            foreach (var sub in baseKey.GetSubKeyNames())
+            {
+                if (!sub.StartsWith('0')) continue;
+                string desc = "";
+                try
+                {
+                    using var subKey = baseKey.OpenSubKey(sub);
+                    desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
+                }
+                catch { continue; }
+
+                if (!desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)) continue;
+                await RunProcessAsync("reg.exe", $@"delete ""HKLM\{RegPath}\{sub}"" /v DisableDynamicPstate /f", ct);
+            }
+        }
+        return OptimizationResult.Ok("NVIDIA voltou ao modo de boost dinâmico.");
     }
 }

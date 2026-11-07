@@ -1,5 +1,6 @@
 using AeR.System.Abstractions;
 using AeR.System.Models;
+using AeR.System.Services;
 
 namespace AeR.System.Optimizations.Memory;
 
@@ -29,11 +30,17 @@ public sealed class TrimSsdOptimization : OptimizationBase
 
     public override async Task<OptimizationResult> ApplyAsync(CancellationToken ct)
     {
-        var (exit, stdout, err) = await RunPowerShellAsync(
-            "Optimize-Volume -DriveLetter C -ReTrim -Verbose", ct);
+        var sysLetter = AppPaths.SystemDriveLetter;
+        var script = $@"
+$letters = Get-Volume | Where-Object {{ $_.DriveType -eq 'Fixed' -and $_.DriveLetter }} | Select-Object -ExpandProperty DriveLetter
+if (-not $letters) {{ $letters = @('{sysLetter}') }}
+foreach ($dl in $letters) {{
+    Optimize-Volume -DriveLetter $dl -ReTrim -ErrorAction SilentlyContinue | Out-Null
+}}";
+        var (exit, _, err) = await RunPowerShellAsync(script, ct);
 
         return exit == 0
-            ? OptimizationResult.Ok("TRIM executado com sucesso no SSD.")
+            ? OptimizationResult.Ok("TRIM executado com sucesso nas unidades fixas (SSD).")
             : OptimizationResult.Fail("Falha ao executar TRIM.", err);
     }
 

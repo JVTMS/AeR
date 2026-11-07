@@ -29,6 +29,9 @@ using AeR.System.Optimizations.Storage;
 using AeR.System.Optimizations.Power;
 using AeR.System.Optimizations.Registry;
 
+// ── Diretório de dados e logs (adaptável a dev e instalação em qualquer PC) ──
+var logsDir = AppPaths.LogsDir;
+
 // ── Configuração do Serilog ────────────────────────────────────────────────
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
@@ -36,16 +39,46 @@ Log.Logger = new LoggerConfiguration()
         outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"
     )
     .WriteTo.File(
-        path: Path.Combine(AppContext.BaseDirectory, "../../logs", "aer-.log"),
+        path: Path.Combine(logsDir, "aer-.log"),
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 7,
+        shared: true,
         outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"
     )
     .CreateLogger();
 
 try
 {
-    Log.Information("⚡ AeR Backend iniciando...");
+    using var identity  = System.Security.Principal.WindowsIdentity.GetCurrent();
+    var isAdmin         = new System.Security.Principal.WindowsPrincipal(identity)
+        .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+
+    // Garantir instância única do AeR.Api (evitar split-brain no Named Pipe AeR_IPC)
+    var currentPid = Environment.ProcessId;
+    foreach (var other in System.Diagnostics.Process.GetProcessesByName("AeR.Api"))
+    {
+        using (other)
+        {
+            if (other.Id == currentPid) continue;
+            if (isAdmin)
+            {
+                try
+                {
+                    Log.Information("Encerrando instância anterior do AeR.Api (PID {Pid})...", other.Id);
+                    other.Kill(entireProcessTree: true);
+                    other.WaitForExit(2000);
+                }
+                catch { }
+            }
+            else
+            {
+                Log.Warning("Outra instância do AeR.Api (PID {Pid}) já está em execução. Encerrando duplicata não-elevada.", other.Id);
+                return;
+            }
+        }
+    }
+
+    Log.Information("⚡ AeR Backend iniciando (Admin={IsAdmin}, PID={Pid})...", isAdmin, currentPid);
 
     var builder = Host.CreateApplicationBuilder(args);
 
@@ -114,6 +147,21 @@ try
     // ── GPU NVIDIA extra ──────────────────────────────────────────────────
     builder.Services.AddSingleton<IOptimization, NvidiaLowLatencyModeOptimization>();
     builder.Services.AddSingleton<IOptimization, DisableNvidiaOverlayOptimization>();
+    // ── GPU AMD — 7 otimizações ───────────────────────────────────────────
+    builder.Services.AddSingleton<IOptimization, AmdMaxPerformanceOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdUlpsDisableOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdTelemetryDisableOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdShaderCacheOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdOverlayDisableOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdTdrOptimizeOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdFreeSyncOptimization>();
+    // ── CPU AMD (Ryzen) — 6 otimizações ──────────────────────────────────
+    builder.Services.AddSingleton<IOptimization, AmdCoolNQuietDisableOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdFtpmLatencyFixOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdPrecisionBoostOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdSmtGamingOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdPspDisableOptimization>();
+    builder.Services.AddSingleton<IOptimization, AmdC6StateDisableOptimization>();
     // ── Memory avançado ───────────────────────────────────────────────────
     builder.Services.AddSingleton<IOptimization, DisableMemoryCompressionOptimization>();
     builder.Services.AddSingleton<IOptimization, DisablePagingExecutiveOptimization>();

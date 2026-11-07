@@ -1,4 +1,4 @@
-﻿/**
+/**
  * AeR — Monitor (v3.0) — Ultra Real-Time
  *
  * Melhorias v3.0:
@@ -281,13 +281,13 @@ function injectStyles() {
     .monitor-legend{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;}
     .mon-leg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
     .mon-leg-label{font-size:var(--text-xs);color:var(--color-text-muted);}
-    .monitor-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4);}
+    .monitor-grid{display:grid;grid-template-columns:repeat(auto-fit, minmax(min(280px, 100%), 1fr));gap:var(--space-4);}
     .mon-chart-card{background:var(--color-bg-surface-1);border:1px solid var(--color-border-subtle);border-radius:var(--radius-xl);padding:var(--space-4);overflow:hidden;}
     .mon-chart-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3);}
     .mon-chart-title{font-size:var(--text-sm);font-weight:600;color:var(--color-text-secondary);}
     .mon-chart-legend{display:flex;gap:8px;}
     .mon-canvas{width:100%;height:140px;display:block;border-radius:var(--radius-md);}
-    .monitor-stats-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-3);}
+    .monitor-stats-grid{display:grid;grid-template-columns:repeat(auto-fit, minmax(min(160px, 100%), 1fr));gap:var(--space-3);}
     .mon-stat-card{background:var(--color-bg-surface-1);border:1px solid var(--color-border-subtle);border-radius:var(--radius-lg);padding:var(--space-3) var(--space-4);}
     .mon-stat-label{font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
     .mon-stat-value{font-size:var(--text-lg);font-weight:700;color:var(--color-text-primary);font-family:var(--font-mono);margin-bottom:6px;}
@@ -296,15 +296,15 @@ function injectStyles() {
     .mon-extra-card{background:var(--color-bg-surface-1);border:1px solid var(--color-border-subtle);border-radius:var(--radius-lg);padding:var(--space-3) var(--space-4);}
     .mon-extra-label{font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
     .mon-extra-value{font-size:var(--text-base);font-weight:700;color:var(--color-text-primary);font-family:var(--font-mono);}
-    .mon-proc-section{background:var(--color-bg-surface-1);border:1px solid var(--color-border-subtle);border-radius:var(--radius-xl);padding:var(--space-4);}
+    .mon-proc-section{background:var(--color-bg-surface-1);border:1px solid var(--color-border-subtle);border-radius:var(--radius-xl);padding:var(--space-4);overflow-x:auto;}
     .mon-section-title{font-size:var(--text-sm);font-weight:700;color:var(--color-text-secondary);margin-bottom:var(--space-3);}
-    .mon-proc-header{display:grid;grid-template-columns:1fr 80px 80px 80px;gap:8px;padding:6px 12px;font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted);text-transform:uppercase;}
-    .mon-proc-row{display:grid;grid-template-columns:1fr 80px 80px 80px;gap:8px;padding:6px 12px;font-size:var(--text-sm);border-radius:var(--radius-md);transition:background .1s;}
+    .mon-proc-header{display:grid;grid-template-columns:1fr 80px 80px 80px;gap:8px;padding:6px 12px;font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted);text-transform:uppercase;min-width:380px;}
+    .mon-proc-row{display:grid;grid-template-columns:1fr 80px 80px 80px;gap:8px;padding:6px 12px;font-size:var(--text-sm);border-radius:var(--radius-md);transition:background .1s;min-width:380px;}
     .mon-proc-row:hover{background:var(--color-bg-surface-2);}
     .mon-proc-name{font-weight:500;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .mon-proc-pid,.mon-proc-ram{color:var(--color-text-muted);font-family:var(--font-mono);font-size:var(--text-xs);}
     .mon-proc-cpu{font-weight:700;font-family:var(--font-mono);}
-    @media(max-width:900px){.monitor-grid{grid-template-columns:1fr}.monitor-stats-grid{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:900px){.monitor-grid{grid-template-columns:1fr}.monitor-stats-grid{grid-template-columns:repeat(auto-fit, minmax(min(140px, 100%), 1fr))}}
   `;
   document.head.appendChild(s);
 }

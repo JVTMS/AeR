@@ -17,9 +17,11 @@
 
 using System.Diagnostics;
 using System.Management;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using AeR.Performance.Models;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32;
 
 namespace AeR.Performance.Services;
 
@@ -66,6 +68,14 @@ public sealed class MetricsService : IDisposable
     private DateTime _lastProcSample = DateTime.MinValue;
     private readonly int _logicalCpuCount = Environment.ProcessorCount;
 
+    // ── Fallback universal de CPU (Win32 GetSystemTimes) e Rede (NetworkInterface) ──
+    private ulong _prevIdleTicks;
+    private ulong _prevKernelTicks;
+    private ulong _prevUserTicks;
+    private long  _prevNetRecvBytes;
+    private long  _prevNetSentBytes;
+    private DateTime _lastNetSample = DateTime.MinValue;
+
     // ── P/Invoke ──────────────────────────────────────────────────────────────
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     private struct MEMORYSTATUSEX
@@ -85,6 +95,10 @@ public sealed class MetricsService : IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetSystemTimes(out ulong lpIdleTime, out ulong lpKernelTime, out ulong lpUserTime);
+
     // ─────────────────────────────────────────────────────────────────────────
 
     public MetricsService(ILogger<MetricsService> logger)
@@ -92,6 +106,14 @@ public sealed class MetricsService : IDisposable
         _logger = logger;
         _totalPhysicalMemoryMB = GetTotalPhysicalMemoryMB();
         _kernelVersion = Environment.OSVersion.Version.ToString();
+
+        // Inicializar baseline de CPU via Win32 (independente de idioma do Windows)
+        if (GetSystemTimes(out var idle, out var kernel, out var user))
+        {
+            _prevIdleTicks   = idle;
+            _prevKernelTicks = kernel;
+            _prevUserTicks   = user;
+        }
 
         Task.Run(InitializeAsync);
     }
@@ -252,33 +274,36 @@ public sealed class MetricsService : IDisposable
             }
             catch { _cpuName = ""; }
 
-            // GPU Name e VRAM total
+            // GPU Name e VRAM total (Registry 64-bit QWORD + fallback WMI)
             try
             {
+                ReadGpuFromRegistry(out var regGpuName, out var regVramMb);
+                if (!string.IsNullOrEmpty(regGpuName)) _gpuName = regGpuName;
+                if (regVramMb > 0) _gpuVramTotalMB = regVramMb;
+
                 using var gpu = new ManagementObjectSearcher("SELECT Name,AdapterRAM FROM Win32_VideoController WHERE AdapterRAM > 0");
                 foreach (ManagementObject obj in gpu.Get())
                 {
                     var name = obj["Name"]?.ToString()?.Trim() ?? "";
                     var isNvidia = name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase);
-                    var isAmd    = name.Contains("AMD",    StringComparison.OrdinalIgnoreCase);
-                    var isArc    = name.Contains("Intel Arc", StringComparison.OrdinalIgnoreCase);
+                    var isAmd    = name.Contains("AMD",    StringComparison.OrdinalIgnoreCase) || name.Contains("Radeon", StringComparison.OrdinalIgnoreCase);
+                    var isArc    = name.Contains("Intel",  StringComparison.OrdinalIgnoreCase);
                     if (!string.IsNullOrEmpty(name) && (isNvidia || isAmd || isArc))
                     {
-                        _gpuName = name;
-                        // AdapterRAM pode ser truncado a 4GB em WMI — mas é melhor que nada
-                        if (obj["AdapterRAM"] is uint vram && vram > 0)
+                        if (string.IsNullOrEmpty(_gpuName)) _gpuName = name;
+                        if (_gpuVramTotalMB <= 0 && obj["AdapterRAM"] is uint vram && vram > 0)
                             _gpuVramTotalMB = Math.Max(_gpuVramTotalMB, (long)(vram / (1024UL * 1024UL)));
                         break;
                     }
                     if (string.IsNullOrEmpty(_gpuName))
                     {
                         _gpuName = name;
-                        if (obj["AdapterRAM"] is uint v2 && v2 > 0)
+                        if (_gpuVramTotalMB <= 0 && obj["AdapterRAM"] is uint v2 && v2 > 0)
                             _gpuVramTotalMB = (long)(v2 / (1024UL * 1024UL));
                     }
                 }
             }
-            catch { _gpuName = ""; }
+            catch { }
 
             // RAM total
             _ramInfo = $"{(int)Math.Round(_totalPhysicalMemoryMB / 1024.0)} GB";
@@ -354,32 +379,44 @@ public sealed class MetricsService : IDisposable
                 return MakeMinimalSnapshot(usedMB, ramPct, uptimeFmt);
             }
 
-            // ── CPU ────────────────────────────────────────────────────────────
+            // ── CPU (PerformanceCounter + Fallback Win32 GetSystemTimes) ───────
             float cpuPct = 0f;
-            try { cpuPct = Math.Clamp(_cpuCounter!.NextValue(), 0f, 100f); }
+            float win32Cpu = GetCpuUsageFromSystemTimes();
+            try
+            {
+                if (_cpuCounter is not null)
+                    cpuPct = Math.Clamp(_cpuCounter.NextValue(), 0f, 100f);
+            }
             catch { }
+            if (cpuPct <= 0.01f && win32Cpu > 0f)
+            {
+                cpuPct = win32Cpu;
+            }
 
             // ── Disco ──────────────────────────────────────────────────────────
             float diskR = 0f, diskW = 0f, diskA = 0f;
             try
             {
-                diskR = Math.Max(0f, _diskReadCounter!.NextValue()  / (1024f * 1024f));
-                diskW = Math.Max(0f, _diskWriteCounter!.NextValue() / (1024f * 1024f));
-                diskA = Math.Clamp(_diskActivityCounter!.NextValue(), 0f, 100f);
+                if (_diskReadCounter is not null)
+                {
+                    diskR = Math.Max(0f, _diskReadCounter.NextValue()  / (1024f * 1024f));
+                    diskW = Math.Max(0f, _diskWriteCounter!.NextValue() / (1024f * 1024f));
+                    diskA = Math.Clamp(_diskActivityCounter!.NextValue(), 0f, 100f);
+                }
             }
             catch { }
 
-            // ── Rede ───────────────────────────────────────────────────────────
-            float netD = 0f, netU = 0f;
-            try
+            // ── Rede (NetworkInterface universal + fallback PerformanceCounter) ──
+            var (netD, netU) = GetNetworkThroughputMBps();
+            if (netD <= 0f && netU <= 0f && _netDownCounter is not null)
             {
-                if (_netDownCounter is not null)
+                try
                 {
                     netD = Math.Max(0f, _netDownCounter.NextValue() / (1024f * 1024f));
                     netU = Math.Max(0f, _netUpCounter!.NextValue()  / (1024f * 1024f));
                 }
+                catch { }
             }
-            catch { }
 
             // ── GPU ────────────────────────────────────────────────────────────
             float gpuPct = 0f;
@@ -511,6 +548,140 @@ public sealed class MetricsService : IDisposable
         }
         catch { }
         return 0f;
+    }
+
+    private float GetCpuUsageFromSystemTimes()
+    {
+        try
+        {
+            if (GetSystemTimes(out var idle, out var kernel, out var user))
+            {
+                var idleDiff   = idle   - _prevIdleTicks;
+                var kernelDiff = kernel - _prevKernelTicks;
+                var userDiff   = user   - _prevUserTicks;
+
+                _prevIdleTicks   = idle;
+                _prevKernelTicks = kernel;
+                _prevUserTicks   = user;
+
+                var totalSys = kernelDiff + userDiff;
+                if (totalSys > 0 && totalSys >= idleDiff)
+                {
+                    var busy = totalSys - idleDiff;
+                    return Math.Clamp((float)((double)busy / totalSys * 100.0), 0f, 100f);
+                }
+            }
+        }
+        catch { }
+        return 0f;
+    }
+
+    private (float DownMBps, float UpMBps) GetNetworkThroughputMBps()
+    {
+        try
+        {
+            var now = DateTime.UtcNow;
+            long totalRecv = 0;
+            long totalSent = 0;
+
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.OperationalStatus != OperationalStatus.Up ||
+                    nic.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
+                    nic.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var stats = nic.GetIPStatistics();
+                    totalRecv += stats.BytesReceived;
+                    totalSent += stats.BytesSent;
+                }
+                catch { }
+            }
+
+            if (_lastNetSample == DateTime.MinValue)
+            {
+                _prevNetRecvBytes = totalRecv;
+                _prevNetSentBytes = totalSent;
+                _lastNetSample    = now;
+                return (0f, 0f);
+            }
+
+            var elapsedSec = (now - _lastNetSample).TotalSeconds;
+            if (elapsedSec <= 0.05) return (0f, 0f);
+
+            var recvDelta = Math.Max(0L, totalRecv - _prevNetRecvBytes);
+            var sentDelta = Math.Max(0L, totalSent - _prevNetSentBytes);
+
+            _prevNetRecvBytes = totalRecv;
+            _prevNetSentBytes = totalSent;
+            _lastNetSample    = now;
+
+            float downMBps = (float)(recvDelta / elapsedSec / (1024.0 * 1024.0));
+            float upMBps   = (float)(sentDelta / elapsedSec / (1024.0 * 1024.0));
+            return (downMBps, upMBps);
+        }
+        catch
+        {
+            return (0f, 0f);
+        }
+    }
+
+    private static void ReadGpuFromRegistry(out string bestName, out long bestVramMb)
+    {
+        bestName   = "";
+        bestVramMb = 0;
+
+        try
+        {
+            const string gpuClassKey = @"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+            using var baseKey = Registry.LocalMachine.OpenSubKey(gpuClassKey);
+            if (baseKey == null) return;
+
+            foreach (var sub in baseKey.GetSubKeyNames())
+            {
+                if (!sub.StartsWith('0')) continue;
+                try
+                {
+                    using var subKey = baseKey.OpenSubKey(sub);
+                    if (subKey == null) continue;
+
+                    var desc = subKey.GetValue("DriverDesc")?.ToString()?.Trim() ?? "";
+                    if (string.IsNullOrEmpty(desc) || desc.Contains("Basic Display", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    long vramBytes = 0;
+                    var qwVal = subKey.GetValue("HardwareInformation.qwMemorySize");
+                    if (qwVal is long qw && qw > 0)
+                        vramBytes = qw;
+                    else if (qwVal is byte[] b && b.Length >= 8)
+                        vramBytes = BitConverter.ToInt64(b, 0);
+                    else if (subKey.GetValue("HardwareInformation.MemorySize") is int m32 && m32 > 0)
+                        vramBytes = (uint)m32;
+                    else if (subKey.GetValue("HardwareInformation.MemorySize") is byte[] b4 && b4.Length >= 4)
+                        vramBytes = BitConverter.ToUInt32(b4, 0);
+
+                    long vramMb = vramBytes > 0 ? vramBytes / (1024L * 1024L) : 0;
+
+                    bool isDedicated = desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)
+                                    || desc.Contains("GeForce", StringComparison.OrdinalIgnoreCase)
+                                    || desc.Contains("Radeon", StringComparison.OrdinalIgnoreCase)
+                                    || desc.Contains("AMD", StringComparison.OrdinalIgnoreCase)
+                                    || desc.Contains("Arc", StringComparison.OrdinalIgnoreCase);
+
+                    if (vramMb > bestVramMb || (isDedicated && string.IsNullOrEmpty(bestName)))
+                    {
+                        bestName   = desc;
+                        bestVramMb = Math.Max(bestVramMb, vramMb);
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
     }
 
     // ── Score (Fase 26 — breakdown detalhado) ──────────────────────────────────

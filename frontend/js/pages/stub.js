@@ -4,7 +4,10 @@
  */
 
 export async function mount(container) {
+  // Obtém o nome da página somente como texto — nunca interpolado em HTML.
   const pageName = document.querySelector('.nav-item--active')?.textContent?.trim() || 'Módulo';
+
+  // Template 100% estático: nenhum dado externo é interpolado aqui.
   container.innerHTML = `
     <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:20px;color:hsl(210,12%,50%);">
       <div style="
@@ -15,7 +18,7 @@ export async function mount(container) {
         font-size:28px;
       ">🚧</div>
       <div>
-        <div style="font-size:17px;font-weight:600;color:hsl(210,18%,80%);text-align:center;">${pageName}</div>
+        <div id="_stub-page-name" style="font-size:17px;font-weight:600;color:hsl(210,18%,80%);text-align:center;"></div>
         <div style="font-size:12px;margin-top:6px;text-align:center;">Este módulo está em desenvolvimento</div>
       </div>
       <div style="
@@ -25,6 +28,10 @@ export async function mount(container) {
       ">Disponível no Passo 4+</div>
     </div>
   `;
+
+  // Insere o nome da página via textContent — sem risco de XSS.
+  const nameEl = container.querySelector('#_stub-page-name');
+  if (nameEl) nameEl.textContent = pageName;
 }
 
 export function unmount() {}

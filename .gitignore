@@ -14,6 +14,8 @@ release-builds/
 frontend/dist/
 frontend/out/
 frontend/release/
+dist/
+start-aer-release.ps1
 Aer/
 
 # ── .NET / C# ─────────────────────────────────────────────────────────────
@@ -28,10 +30,12 @@ backend/**/.vs/
 TestResults/
 BenchmarkDotNet.Artifacts/
 
-# ── Logs ──────────────────────────────────────────────────────────────────
+# ── Logs & Backups Locais ─────────────────────────────────────────────────
 logs/*.log
 logs/*.txt
 logs/
+backups/
+library.json
 
 # ── Banco de Dados local ───────────────────────────────────────────────────
 *.db

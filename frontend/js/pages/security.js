@@ -57,6 +57,7 @@ function injectStyles() {
   const s = document.createElement('style'); s.id = 'sec-styles';
   s.textContent = `.security-page{display:flex;flex-direction:column;height:100%;overflow-y:auto}
     .sec-grid{display:grid;grid-template-columns:220px 1fr;gap:var(--space-6);margin-bottom:var(--space-6);align-items:start}
+    @media (max-width: 768px) { .sec-grid { grid-template-columns: 1fr; } }
     .sec-score-card{display:flex;flex-direction:column;align-items:center;gap:var(--space-3);background:var(--color-bg-surface-1);border:1px solid var(--color-border-subtle);border-radius:var(--radius-xl);padding:var(--space-6)}
     .sec-score-ring{position:relative;width:120px;height:120px}.sec-score-ring svg{position:absolute;inset:0;width:100%;height:100%}
     .sec-score-val{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:var(--color-text-primary)}

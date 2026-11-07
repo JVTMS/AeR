@@ -46,7 +46,11 @@ public sealed class DisableTipsOptimization : OptimizationBase
         };
 
         foreach (var args in cmds)
-            await RunProcessAsync("reg.exe", args, ct);
+        {
+            var (exit, _, err) = await RunProcessAsync("reg.exe", args, ct);
+            if (exit != 0)
+                return OptimizationResult.Fail("Falha ao desativar dicas do Windows.", err);
+        }
 
         return OptimizationResult.Ok("Dicas, sugestões e apps sugeridos desativados.");
     }
@@ -61,7 +65,11 @@ public sealed class DisableTipsOptimization : OptimizationBase
         };
 
         foreach (var args in cmds)
-            await RunProcessAsync("reg.exe", args, ct);
+        {
+            var (exit, _, err) = await RunProcessAsync("reg.exe", args, ct);
+            if (exit != 0)
+                return OptimizationResult.Fail("Falha ao reativar dicas do Windows.", err);
+        }
 
         return OptimizationResult.Ok("Dicas e sugestões reativadas.");
     }

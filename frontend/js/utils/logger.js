@@ -20,8 +20,10 @@ function formatTime() {
 
 function log(level, module, ...args) {
   if (LOG_LEVELS[level] < CURRENT_LEVEL) return;
-  const prefix = `%c[${formatTime()}] [${level}] [${module}]`;
-  console.log(prefix, COLORS[level], ...args);
+  // Format string CONSTANTE: %c aplica o estilo CSS; %s substitui os valores
+  // dinâmicos (time, level, module) como strings separadas, nunca interpoladas
+  // na format string — evita format specifier injection caso module contenha %s/%d.
+  console.log('%c[%s] [%s] [%s]', COLORS[level], formatTime(), level, module, ...args);
 }
 
 export const Logger = {

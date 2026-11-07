@@ -31,13 +31,17 @@ public sealed class NvidiaMaxPerformanceOptimization : OptimizationBase
             bool foundAny = false;
             foreach (var sub in baseKey.GetSubKeyNames())
             {
-                using var subKey = baseKey.OpenSubKey(sub);
-                var desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
-                if (!desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)) continue;
-                foundAny = true;
-                // Se qualquer adaptador NVIDIA não tem a configuração, retorna false
-                if (subKey?.GetValue("PerfLevelSrc") is not int v || v != 0x2222)
-                    return false;
+                try
+                {
+                    using var subKey = baseKey.OpenSubKey(sub);
+                    var desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
+                    if (!desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)) continue;
+                    foundAny = true;
+                    // Se qualquer adaptador NVIDIA não tem a configuração, retorna false
+                    if (subKey?.GetValue("PerfLevelSrc") is not int v || v != 0x2222)
+                        return false;
+                }
+                catch { }
             }
             return foundAny; // só retorna true se encontrou pelo menos um e todos têm a config
         }
@@ -46,22 +50,57 @@ public sealed class NvidiaMaxPerformanceOptimization : OptimizationBase
     }
     public override async Task<OptimizationResult> ApplyAsync(CancellationToken ct)
     {
-        var script = @"
-Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}' -ErrorAction SilentlyContinue |
-Where-Object { try { (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DriverDesc -match 'NVIDIA' } catch { $false } } |
-ForEach-Object { Set-ItemProperty $_.PSPath -Name 'PerfLevelSrc' -Value 0x2222 -Type DWord -Force }";
-        var (exit, _, err) = await RunPowerShellAsync(script.Replace(Environment.NewLine, " "), ct);
-        return exit == 0
-            ? OptimizationResult.Ok("NVIDIA configurada para maxima performance (PerfLevelSrc=0x2222).")
-            : OptimizationResult.Fail("Falha ao configurar NVIDIA.", err);
+        using var baseKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(RegPath);
+        if (baseKey == null)
+            return OptimizationResult.Fail("Chave de classe de GPU não encontrada.");
+
+        int applied = 0;
+        foreach (var sub in baseKey.GetSubKeyNames())
+        {
+            if (!sub.StartsWith('0')) continue;
+            string desc = "";
+            try
+            {
+                using var subKey = baseKey.OpenSubKey(sub);
+                desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
+            }
+            catch { continue; }
+
+            if (!desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var (exit, _, err) = await RunProcessAsync(
+                "reg.exe",
+                $@"add ""HKLM\{RegPath}\{sub}"" /v PerfLevelSrc /t REG_DWORD /d 0x2222 /f",
+                ct);
+            if (exit != 0)
+                return OptimizationResult.Fail("Falha ao configurar NVIDIA.", err);
+            applied++;
+        }
+
+        return applied > 0
+            ? OptimizationResult.Ok("NVIDIA configurada para máxima performance (PerfLevelSrc=0x2222).")
+            : OptimizationResult.Fail("Adaptador NVIDIA não encontrado no registro.");
     }
     public override async Task<OptimizationResult> RevertAsync(CancellationToken ct)
     {
-        var script = @"
-Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}' -ErrorAction SilentlyContinue |
-Where-Object { try { (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DriverDesc -match 'NVIDIA' } catch { $false } } |
-ForEach-Object { Remove-ItemProperty $_.PSPath -Name 'PerfLevelSrc' -ErrorAction SilentlyContinue }";
-        await RunPowerShellAsync(script.Replace(Environment.NewLine, " "), ct);
-        return OptimizationResult.Ok("NVIDIA restaurada ao modo de energia padrao.");
+        using var baseKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(RegPath);
+        if (baseKey != null)
+        {
+            foreach (var sub in baseKey.GetSubKeyNames())
+            {
+                if (!sub.StartsWith('0')) continue;
+                string desc = "";
+                try
+                {
+                    using var subKey = baseKey.OpenSubKey(sub);
+                    desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
+                }
+                catch { continue; }
+
+                if (!desc.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)) continue;
+                await RunProcessAsync("reg.exe", $@"delete ""HKLM\{RegPath}\{sub}"" /v PerfLevelSrc /f", ct);
+            }
+        }
+        return OptimizationResult.Ok("NVIDIA restaurada ao modo de energia padrão.");
     }
 }

@@ -6,7 +6,7 @@ public sealed class DisableMemoryCompressionOptimization : OptimizationBase
     public override string Id          => "memory.disable-compression";
     public override string Name        => "Desativar Compressao de Memoria";
     public override string Description => "Desativa a compressao de paginas de memoria do Windows que usa CPU desnecessariamente em sistemas com bastante RAM.";
-    public override string Category    => "Memoria";
+    public override string Category    => "Memória";
     public override OptimizationMode Mode   => OptimizationMode.Expert;
     public override RiskLevel         Risk   => RiskLevel.Moderate;
     public override BackupStrategy    Backup => BackupStrategy.None;

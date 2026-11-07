@@ -34,19 +34,26 @@ public sealed class DisablePciePowerSaveOptimization : OptimizationBase
         ref Guid PowerSettingGuid,
         out uint AcValueIndex);
 
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr hMem);
+
     public override bool IsApplied()
     {
         try
         {
             if (PowerGetActiveScheme(IntPtr.Zero, out var ptr) == 0 && ptr != IntPtr.Zero)
             {
-                var scheme = Marshal.PtrToStructure<Guid>(ptr);
-                var subGroup = SubGroupGuid;
-                var setting = SettingGuid;
-                if (PowerReadACValueIndex(IntPtr.Zero, ref scheme, ref subGroup, ref setting, out var val) == 0)
+                try
                 {
-                    return val == 0;
+                    var scheme = Marshal.PtrToStructure<Guid>(ptr);
+                    var subGroup = SubGroupGuid;
+                    var setting = SettingGuid;
+                    if (PowerReadACValueIndex(IntPtr.Zero, ref scheme, ref subGroup, ref setting, out var val) == 0)
+                    {
+                        return val == 0;
+                    }
                 }
+                finally { LocalFree(ptr); }
             }
         }
         catch { }
@@ -54,14 +61,16 @@ public sealed class DisablePciePowerSaveOptimization : OptimizationBase
     }
     public override async Task<OptimizationResult> ApplyAsync(CancellationToken ct)
     {
-        await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT 501a4d13-42af-4429-9fd1-a8218c268e20 ee12f906-d277-404b-b6da-e5fa1a576df5 0", ct);
-        var (exit, _, err) = await RunProcessAsync("powercfg.exe", "/apply", ct);
-        return exit == 0 ? OptimizationResult.Ok("PCIe ASPM (Power Save) desativado.") : OptimizationResult.Fail("Falha.", err);
+        var (exit1, _, err1) = await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT 501a4d13-42af-4429-9fd1-a8218c268e20 ee12f906-d277-404b-b6da-e5fa1a576df5 0", ct);
+        var (exit2, _, err2) = await RunProcessAsync("powercfg.exe", "/setactive SCHEME_CURRENT", ct);
+        return (exit1 == 0 && exit2 == 0)
+            ? OptimizationResult.Ok("PCIe ASPM (Power Save) desativado.")
+            : OptimizationResult.Fail("Falha ao desativar PCIe Power Save.", string.IsNullOrWhiteSpace(err1) ? err2 : err1);
     }
     public override async Task<OptimizationResult> RevertAsync(CancellationToken ct)
     {
         await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT 501a4d13-42af-4429-9fd1-a8218c268e20 ee12f906-d277-404b-b6da-e5fa1a576df5 2", ct);
-        await RunProcessAsync("powercfg.exe", "/apply", ct);
+        await RunProcessAsync("powercfg.exe", "/setactive SCHEME_CURRENT", ct);
         return OptimizationResult.Ok("PCIe ASPM restaurado ao padrao.");
     }
 }

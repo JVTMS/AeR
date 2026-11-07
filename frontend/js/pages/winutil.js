@@ -139,9 +139,9 @@ function injectStyles() {
       min-height: 100%; box-sizing: border-box;
     }
 
-    /* Hero */
+    /* Hero Responsivo */
     .wu-hero {
-      position: relative; display: flex; align-items: center; gap: var(--space-5, 20px);
+      position: relative; display: flex; align-items: center; gap: var(--space-5, 20px); flex-wrap: wrap;
       background: linear-gradient(135deg, rgba(37,99,235,.15) 0%, rgba(109,40,217,.1) 100%);
       border: 1px solid rgba(37,99,235,.3);
       border-radius: var(--radius-xl, 16px);

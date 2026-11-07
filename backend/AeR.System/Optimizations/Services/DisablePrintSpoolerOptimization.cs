@@ -1,4 +1,4 @@
-﻿using AeR.System.Abstractions;
+using AeR.System.Abstractions;
 using AeR.System.Models;
 namespace AeR.System.Optimizations.Services;
 public sealed class DisablePrintSpoolerOptimization : OptimizationBase
@@ -7,7 +7,7 @@ public sealed class DisablePrintSpoolerOptimization : OptimizationBase
     public override string Id          => "services.disable-spooler";
     public override string Name        => "Desativar Print Spooler (sem impressora)";
     public override string Description => "Para o servico de impressao que roda em segundo plano mesmo sem impressoras conectadas, consumindo RAM e sendo vetor de vulnerabilidades.";
-    public override string Category    => "Servicos";
+    public override string Category    => "Serviços";
     public override OptimizationMode Mode   => OptimizationMode.Expert;
     public override RiskLevel         Risk   => RiskLevel.Safe;
     public override BackupStrategy    Backup => BackupStrategy.ServiceState;

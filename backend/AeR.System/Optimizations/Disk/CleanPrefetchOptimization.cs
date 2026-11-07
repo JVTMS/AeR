@@ -1,12 +1,13 @@
 using AeR.System.Abstractions;
 using AeR.System.Models;
+using AeR.System.Services;
 
 namespace AeR.System.Optimizations.Disk;
 
 /// <summary>Limpa o cache Prefetch do Windows.</summary>
 public sealed class CleanPrefetchOptimization : OptimizationBase
 {
-    private static readonly string PrefetchPath = @"C:\Windows\Prefetch";
+    private static string PrefetchPath => AppPaths.PrefetchDir;
 
     public override string Id          => "disk.clean-prefetch";
     public override string Name        => "Limpar Cache Prefetch";
@@ -52,9 +53,7 @@ public sealed class CleanPrefetchOptimization : OptimizationBase
         }
         catch (UnauthorizedAccessException)
         {
-            // Tenta via PowerShell com silenciamento de erros caso não tenha permissão direta
-            var (exit, _, _) = await RunPowerShellAsync("Remove-Item -Path 'C:\\Windows\\Prefetch\\*.pf' -Force -ErrorAction SilentlyContinue", ct);
-            return OptimizationResult.Ok("Limpeza de cache Prefetch solicitada.");
+            return OptimizationResult.Fail("Acesso negado à pasta Prefetch. Execute o AeR como Administrador.");
         }
         catch (Exception ex)
         {

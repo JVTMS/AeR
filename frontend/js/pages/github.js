@@ -342,12 +342,13 @@ function escapeHtml(str) {
 // ─── Estilos CSS da página ──────────────────────────────────────────────────
 const STYLES = `
 <style id="git-page-styles">
-.git-page { display:flex; flex-direction:column; gap:0; padding:24px; max-width:900px; }
+.git-page { display:flex; flex-direction:column; gap:0; padding: clamp(14px, 2vw, 24px); max-width: 1400px; width: 100%; box-sizing: border-box; }
 .git-page-header { margin-bottom:20px; }
 .git-page-title { font-size:20px; font-weight:600; color:#f0f0f0; display:flex; align-items:center; gap:8px; }
 .git-page-sub { font-size:12px; color:#666; margin-top:4px; }
 
 .git-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+@media (max-width: 768px) { .git-grid { grid-template-columns: 1fr; } }
 .git-grid--full { grid-column:1/-1; }
 
 .git-card {

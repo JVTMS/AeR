@@ -9,30 +9,142 @@ import { applySettings }        from './pages/settings.js';
 
 const MODULE = 'App';
 
-// ─── Controles de Janela Frameless ───────────────────────────────────────
+// ─── Controles de Janela Frameless e Responsiva ──────────────────────────
 function initWindowControls() {
-  document.getElementById('btn-minimize')?.addEventListener('click', () => window.windowAPI?.minimize());
-  document.getElementById('btn-maximize')?.addEventListener('click', () => window.windowAPI?.maximize());
-  document.getElementById('btn-close')?.addEventListener('click',    () => window.windowAPI?.close());
+  const btnMin = document.getElementById('btn-minimize');
+  const btnMax = document.getElementById('btn-maximize');
+  const btnFs  = document.getElementById('btn-fullscreen');
+  const btnClose = document.getElementById('btn-close');
+  const titlebar = document.getElementById('titlebar');
+
+  btnMin?.addEventListener('click', () => window.windowAPI?.minimize());
+  btnMax?.addEventListener('click', () => window.windowAPI?.toggleMaximize());
+  btnFs?.addEventListener('click',  () => window.windowAPI?.toggleFullscreen());
+  btnClose?.addEventListener('click', () => window.windowAPI?.close());
+
+  // Duplo clique na área de arraste da titlebar para maximizar / restaurar
+  titlebar?.addEventListener('dblclick', (e) => {
+    if (e.target.closest('button, input, .status-chip, a')) return;
+    window.windowAPI?.toggleMaximize();
+  });
+
+  // Atualizar visual da UI conforme estado da janela
+  const updateUIState = (state) => {
+    if (!state) return;
+    if (state.isMaximized) {
+      document.body.classList.add('is-maximized');
+      if (btnMax) {
+        btnMax.setAttribute('aria-label', 'Restaurar');
+        btnMax.title = 'Restaurar';
+      }
+    } else {
+      document.body.classList.remove('is-maximized');
+      if (btnMax) {
+        btnMax.setAttribute('aria-label', 'Maximizar');
+        btnMax.title = 'Maximizar';
+      }
+    }
+
+    if (state.isFullScreen) {
+      document.body.classList.add('is-fullscreen');
+      if (btnFs) {
+        btnFs.setAttribute('aria-label', 'Sair da tela cheia');
+        btnFs.title = 'Sair da tela cheia (F11)';
+      }
+    } else {
+      document.body.classList.remove('is-fullscreen');
+      if (btnFs) {
+        btnFs.setAttribute('aria-label', 'Tela cheia');
+        btnFs.title = 'Tela cheia (F11)';
+      }
+    }
+  };
+
+  // Listener de eventos vindos do Main Process
+  if (typeof window.windowAPI?.onStateChange === 'function') {
+    window.windowAPI.onStateChange(updateUIState);
+  }
+
+  // Buscar estado inicial
+  if (typeof window.windowAPI?.getState === 'function') {
+    window.windowAPI.getState().then(updateUIState).catch(() => {});
+  }
+
+  // Atalhos globais de teclado: F11 (Tela cheia), Ctrl+B (Sidebar)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F11') {
+      e.preventDefault();
+      window.windowAPI?.toggleFullscreen();
+    }
+    if (e.key === 'Escape' && document.body.classList.contains('is-fullscreen')) {
+      window.windowAPI?.toggleFullscreen();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      const sidebar = document.getElementById('sidebar');
+      const isCollapsed = sidebar?.classList.contains('sidebar--collapsed');
+      sidebar?.classList.toggle('sidebar--collapsed');
+      localStorage.setItem('aer:sidebar-collapsed', String(!isCollapsed));
+    }
+  });
 }
 
 // ─── Status Chip (topbar) ─────────────────────────────────────────────────
-function setChipStatus(status) {
+let currentIsAdmin = null;
+
+function setChipStatus(status, isAdmin = currentIsAdmin) {
   const chip  = document.getElementById('backend-chip');
   const label = document.getElementById('backend-chip-label');
   if (!chip || !label) return;
+  if (typeof isAdmin === 'boolean') currentIsAdmin = isAdmin;
+
   if (status === 'connected') {
-    chip.className    = 'status-chip';
-    label.textContent = 'Online';
+    chip.className = 'status-chip';
+    if (currentIsAdmin === true) {
+      label.textContent = 'Online · Admin 🛡️';
+      chip.title        = 'Backend C# conectado com privilégios de Administrador';
+      chip.style.cursor = 'default';
+    } else if (currentIsAdmin === false) {
+      label.textContent = 'Online · Elevar ⚠️';
+      chip.title        = 'Executando como usuário padrão. Clique para elevar como Administrador (UAC).';
+      chip.style.cursor = 'pointer';
+    } else {
+      label.textContent = 'Online';
+      chip.title        = 'Status de conexão com o Backend C#';
+      chip.style.cursor = 'default';
+    }
   } else {
     chip.className    = 'status-chip status-chip--offline';
     label.textContent = 'Offline';
+    chip.title        = 'Backend C# desconectado';
+    chip.style.cursor = 'default';
+  }
+}
+
+async function handleChipClick() {
+  if (currentIsAdmin !== false) return;
+  const label = document.getElementById('backend-chip-label');
+  if (label) label.textContent = 'Elevando UAC...';
+  try {
+    const res = await window.aer?.invoke('system:elevate');
+    if (res?.success) {
+      for (let i = 0; i < 12; i++) {
+        await new Promise(r => setTimeout(r, 700));
+        const ok = await runPingTest();
+        if (ok && currentIsAdmin) break;
+      }
+    } else {
+      setChipStatus('connected', false);
+    }
+  } catch {
+    setChipStatus('connected', false);
   }
 }
 
 // ─── Conexão com o Backend C# ─────────────────────────────────────────────
 async function initBackendConnection() {
   setChipStatus('disconnected');
+  document.getElementById('backend-chip')?.addEventListener('click', handleChipClick);
 
   // Fechar splash: usa __splashDone se disponível, senão manipula DOM direto
   let splashClosed = false;
@@ -99,8 +211,8 @@ async function runPingTest() {
     const response = await window.aer?.invoke('ping');
     if (!response) return false;
     const latency = (performance.now() - t0).toFixed(1);
-    Logger.info(MODULE, `✅ Ping OK! Latência: ${latency}ms`);
-    setChipStatus('connected');
+    Logger.info(MODULE, `✅ Ping OK! Latência: ${latency}ms (Admin=${response.isAdmin})`);
+    setChipStatus('connected', typeof response.isAdmin === 'boolean' ? response.isAdmin : currentIsAdmin);
     const el = document.getElementById('meta-score-lat');
     if (el) el.textContent = `${latency} ms`;
     return true;
@@ -373,6 +485,61 @@ function injectNotifStyles() {
   document.head.appendChild(s);
 }
 
+// ─── Controle Responsivo da Sidebar ───────────────────────────────────────
+function initSidebarControls() {
+  const sidebar = document.getElementById('sidebar');
+  const toggleBtn = document.getElementById('btn-toggle-sidebar');
+  const STORAGE_KEY = 'aer:sidebar-collapsed';
+
+  const userPref = localStorage.getItem(STORAGE_KEY);
+  let isCollapsed = userPref === 'true';
+
+  const applySidebarState = (collapsed, save = true) => {
+    isCollapsed = collapsed;
+    if (collapsed) {
+      sidebar?.classList.add('sidebar--collapsed');
+    } else {
+      sidebar?.classList.remove('sidebar--collapsed');
+    }
+    if (save) {
+      localStorage.setItem(STORAGE_KEY, String(collapsed));
+    }
+  };
+
+  // Aplica preferência inicial ou auto-colapso em telas menores
+  if (userPref !== null) {
+    applySidebarState(isCollapsed, false);
+  } else if (window.innerWidth <= 880) {
+    applySidebarState(true, false);
+  }
+
+  toggleBtn?.addEventListener('click', () => {
+    applySidebarState(!sidebar?.classList.contains('sidebar--collapsed'), true);
+  });
+
+  // Auto-colapso responsivo com debounce ao redimensionar
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      const storedPref = localStorage.getItem(STORAGE_KEY);
+      if (window.innerWidth <= 880) {
+        sidebar?.classList.add('sidebar--collapsed');
+      } else if (storedPref !== 'true') {
+        sidebar?.classList.remove('sidebar--collapsed');
+      }
+    }, 100);
+  });
+
+  // Configura tooltips automáticos nos itens de navegação para o modo recolhido
+  document.querySelectorAll('.sidebar .nav-item').forEach(item => {
+    const text = item.textContent.trim();
+    if (text && !item.getAttribute('title')) {
+      item.setAttribute('title', text);
+    }
+  });
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────
 async function init() {
   applySettings(); // aplica tema persistido antes de qualquer coisa
@@ -380,6 +547,7 @@ async function init() {
   Logger.info(MODULE, `Plataforma: ${window.systemInfo?.platform} | Arch: ${window.systemInfo?.arch}`);
 
   initWindowControls();
+  initSidebarControls();
   initSearch();
   initNotifications();
   initRouter();

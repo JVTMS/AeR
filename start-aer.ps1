@@ -1,12 +1,29 @@
-# AeR Launcher v1.3 - Compativel com PowerShell 5 (Windows integrado)
-# Correcoes: removido operador ?. (PS7 only), corrigido encoding das strings,
-#            backend usa "dotnet run" em vez do .exe nao self-contained.
+# AeR Launcher v1.4 - Compativel com PowerShell 5 (Windows integrado)
+# Auto-elevacao UAC para Administrador (necessario para otimizacoes de sistema)
+
+param(
+    [switch]$NoElevate
+)
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+$IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $IsAdmin -and -not $NoElevate) {
+    try {
+        $elevated = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"", "-NoElevate" `
+            -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop
+        if ($elevated) {
+            exit 0
+        }
+    } catch {
+        # Usuario recusou UAC — continua em modo padrao (podera elevar pela interface)
+    }
+}
+
 $Root        = $PSScriptRoot
 $BackendProj = Join-Path $Root "backend\AeR.Api\AeR.Api.csproj"
-$BackendExe  = Join-Path $Root "backend\AeR.Api\bin\Debug\net10.0\AeR.Api.exe"
+$BackendExe  = Join-Path $Root "backend\AeR.Api\bin\Debug\net10.0\win-x64\AeR.Api.exe"
 $FrontendDir = Join-Path $Root "frontend"
 $LogsDir     = Join-Path $Root "logs"
 $LogFile     = Join-Path $LogsDir "launcher.log"
@@ -41,8 +58,8 @@ if (-not $DotnetExe) {
 if (-not $DotnetExe) {
     Add-Type -AssemblyName System.Windows.Forms
     $msg = "O .NET 10 Runtime nao foi encontrado.`n`n" +
-           "Instale o .NET 10 SDK como Administrador:`n" +
-           "D:\Fox\dotnet-sdk-10.0.301-win-x64.exe"
+           "Instale o .NET 10 SDK em:`n" +
+           "https://dotnet.microsoft.com/download/dotnet/10.0"
     [System.Windows.Forms.MessageBox]::Show(
         $msg,
         "AeR - .NET nao encontrado",
@@ -112,14 +129,24 @@ if (Test-Path $BackendExe) {
     Log "Compilacao concluida."
 }
 
-# -- Iniciar backend via dotnet run (nao o .exe, que nao e self-contained) --
-Log "Iniciando backend via dotnet run..."
-$backend = Start-Process `
-    -FilePath $DotnetExe `
-    -ArgumentList "run", "--project", $BackendProj, "--no-build", "--configuration", "Debug" `
-    -PassThru -WindowStyle Hidden `
-    -RedirectStandardOutput $backendLog `
-    -RedirectStandardError  $backendErrLog
+# -- Iniciar backend ------------------------------------------------------
+if (Test-Path $BackendExe) {
+    Log "Iniciando backend executavel (Admin=$IsAdmin)..."
+    $backend = Start-Process `
+        -FilePath $BackendExe `
+        -WorkingDirectory (Split-Path $BackendExe -Parent) `
+        -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput $backendLog `
+        -RedirectStandardError  $backendErrLog
+} else {
+    Log "Iniciando backend via dotnet run (Admin=$IsAdmin)..."
+    $backend = Start-Process `
+        -FilePath $DotnetExe `
+        -ArgumentList "run", "--project", $BackendProj, "--no-build", "--configuration", "Debug" `
+        -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput $backendLog `
+        -RedirectStandardError  $backendErrLog
+}
 
 if ($null -eq $backend) {
     Log "ERRO: Nao foi possivel iniciar o backend."

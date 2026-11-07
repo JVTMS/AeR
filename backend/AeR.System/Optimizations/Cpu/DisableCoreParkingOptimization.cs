@@ -53,7 +53,7 @@ public sealed class DisableCoreParkingOptimization : OptimizationBase
         await RunProcessAsync("reg.exe", $@"add ""HKLM\{RegPath}"" /v ValueMin /t REG_DWORD /d 4294967295 /f", ct);
         var (exit, _, err) = await RunProcessAsync("powercfg.exe",
             "/setacvalueindex SCHEME_CURRENT SUB_PROCESSOR 0cc5b647-c1df-4637-891a-dec35c318583 100", ct);
-        await RunProcessAsync("powercfg.exe", "/apply", ct);
+        await RunProcessAsync("powercfg.exe", "/setactive SCHEME_CURRENT", ct);
         return exit == 0 ? OptimizationResult.Ok("Core Parking desativado — todos os nucleos sempre ativos.") : OptimizationResult.Fail("Falha.", err);
     }
 
@@ -62,7 +62,7 @@ public sealed class DisableCoreParkingOptimization : OptimizationBase
         await RunProcessAsync("reg.exe", $@"add ""HKLM\{RegPath}"" /v ValueMax /t REG_DWORD /d 0 /f", ct);
         await RunProcessAsync("reg.exe", $@"add ""HKLM\{RegPath}"" /v ValueMin /t REG_DWORD /d 0 /f", ct);
         await RunProcessAsync("powercfg.exe", "/setacvalueindex SCHEME_CURRENT SUB_PROCESSOR 0cc5b647-c1df-4637-891a-dec35c318583 0", ct);
-        await RunProcessAsync("powercfg.exe", "/apply", ct);
+        await RunProcessAsync("powercfg.exe", "/setactive SCHEME_CURRENT", ct);
         return OptimizationResult.Ok("Core Parking restaurado ao comportamento padrao.");
     }
 }

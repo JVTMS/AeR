@@ -92,13 +92,42 @@ class PipeClient extends EventEmitter {
   // ── Comunicação ──────────────────────────────────────────────────────────
 
   /**
+   * Timeouts específicos por comando (em ms) para operações pesadas de sistema.
+   */
+  static COMMAND_TIMEOUTS = {
+    'cleanup:execute':    60000,
+    'cleanup:scan':       45000,
+    'optimizer:scan':     60000,
+    'optimizer:apply':    60000,
+    'optimizer:revert':   60000,
+    'tweaks:scan':        45000,
+    'tweaks:apply':       90000,
+    'tweaks:revert':      60000,
+    'tweaks:preset':      90000,
+    'benchmark:cpu':      60000,
+    'benchmark:ram':      60000,
+    'benchmark:disk':     60000,
+    'programs:uninstall': 120000,
+    'programs:list':      45000,
+    'terminal:exec':      35000,
+    'backup:export':      45000,
+    'backup:restore':     60000,
+    'network:ping':       30000,
+  };
+
+  /**
    * Envia um comando ao backend e retorna uma Promise com a resposta.
    * @param {string} command - Ex: 'ping', 'metrics:get'
    * @param {object} [payload={}] - Payload opcional
-   * @param {number} [timeoutMs=10000] - Timeout em ms
+   * @param {number} [timeoutMs] - Timeout em ms (usa tabela por comando ou 30000ms por padrão)
    * @returns {Promise<object>} Dados da resposta
    */
-  invoke(command, payload = {}, timeoutMs = 10000) {
+  invoke(command, payload = {}, timeoutMs) {
+    const effectiveTimeout =
+      typeof timeoutMs === 'number' && timeoutMs > 0
+        ? timeoutMs
+        : (PipeClient.COMMAND_TIMEOUTS[command] ?? 30000);
+
     return new Promise((resolve, reject) => {
       if (!this._connected || !this._socket) {
         reject(new Error('PipeClient não está conectado.'));
@@ -112,9 +141,9 @@ class PipeClient extends EventEmitter {
       const timer = setTimeout(() => {
         if (this._pending.has(id)) {
           this._pending.delete(id);
-          reject(new Error(`Timeout no comando '${command}' (${timeoutMs}ms).`));
+          reject(new Error(`Timeout no comando '${command}' (${effectiveTimeout}ms).`));
         }
-      }, timeoutMs);
+      }, effectiveTimeout);
 
       this._pending.set(id, { resolve, reject, timer });
 

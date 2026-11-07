@@ -15,12 +15,13 @@ const listeners = new Map();
  * Envia um comando ao backend e aguarda resposta.
  * @param {string} command - Comando ex: 'metrics:get'
  * @param {object} [payload] - Payload opcional
+ * @param {number} [timeoutMs] - Timeout opcional em ms
  * @returns {Promise<object>} Resposta deserializada
  */
-export async function invoke(command, payload = {}) {
+export async function invoke(command, payload = {}, timeoutMs) {
   Logger.debug(MODULE, `invoke → ${command}`, payload);
   try {
-    const result = await window.aer.invoke(command, payload);
+    const result = await window.aer.invoke(command, payload, timeoutMs);
     Logger.debug(MODULE, `invoke ← ${command}`, result);
     return result;
   } catch (err) {
@@ -265,3 +266,7 @@ export const revertTweaks   = (ids)    => invoke('tweaks:revert', { ids });
 
 // ── WinUtil (Fase 28) ─────────────────────────────────────────────────────
 export const launchWinUtil  = ()       => invoke('winutil:launch');
+
+// ── Sistema (Privilégio Admin & Hardware) ─────────────────────────────────
+export const getSystemStatus = ()      => invoke('system:status');
+export const elevateBackend  = ()      => invoke('system:elevate');

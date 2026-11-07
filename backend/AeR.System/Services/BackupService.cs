@@ -14,11 +14,7 @@ public class BackupService
     public BackupService(ILogger<BackupService> logger)
     {
         _logger = logger;
-        _backupRootPath = Path.Combine(AppContext.BaseDirectory, "../../backups");
-        if (!Directory.Exists(_backupRootPath))
-        {
-            Directory.CreateDirectory(_backupRootPath);
-        }
+        _backupRootPath = AppPaths.BackupsDir;
     }
 
     private string GetBackupFilePath(string optimizationId, string extension)
@@ -80,10 +76,11 @@ public class BackupService
         using var process = Process.Start(processInfo);
         if (process != null)
         {
+            var errorTask = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             if (process.ExitCode == 0) return true;
             
-            var error = await process.StandardError.ReadToEndAsync();
+            var error = await errorTask;
             _logger.LogWarning("Failed to restore registry backup: {Error}", error);
         }
         return false;
@@ -110,10 +107,12 @@ public class BackupService
         using var process = Process.Start(processInfo);
         if (process != null)
         {
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask  = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             if (process.ExitCode == 0)
             {
-                var output = await process.StandardOutput.ReadToEndAsync();
+                var output = await outputTask;
                 var startType = "demand"; // default
                 if (output.Contains("AUTO_START")) startType = "auto";
                 else if (output.Contains("DISABLED")) startType = "disabled";

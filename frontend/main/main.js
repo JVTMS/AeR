@@ -16,9 +16,13 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const net = require('net');
 const { spawn, execFile } = require('child_process');
 const pipeClient = require('./pipe-client');
 const gitHandlers = require('./git-handlers');
+const WindowStateManager = require('./window-state-manager');
+
+let windowStateManager = null;
 
 // ─── Configurações Globais ─────────────────────────────────────────────────
 const IS_DEV = process.argv.includes('--inspect=5858') || !app.isPackaged;
@@ -49,11 +53,19 @@ let backendProcess = null;
 
 // ─── Criação da Janela Principal ──────────────────────────────────────────
 function createMainWindow() {
+  if (!windowStateManager) {
+    windowStateManager = new WindowStateManager();
+  }
+  const initialBounds = windowStateManager.getValidatedBounds();
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 960,
-    minHeight: 600,
+    x: initialBounds.x,
+    y: initialBounds.y,
+    width: initialBounds.width,
+    height: initialBounds.height,
+    minWidth: 780,
+    minHeight: 540,
+    resizable: true,
     frame: false,           // Frameless para titlebar customizada
     transparent: false,
     backgroundColor: '#0A0A0F',
@@ -67,6 +79,29 @@ function createMainWindow() {
       webSecurity: true,
     },
   });
+
+  windowStateManager.manage(mainWindow);
+
+  // Notificar Renderer sobre qualquer alteração no estado da janela
+  const notifyWindowState = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      mainWindow.webContents.send('window:state-changed', {
+        isMaximized: mainWindow.isMaximized(),
+        isFullScreen: mainWindow.isFullScreen(),
+        isMinimized: mainWindow.isMinimized(),
+        bounds: mainWindow.getBounds(),
+      });
+    } catch { }
+  };
+
+  mainWindow.on('maximize', notifyWindowState);
+  mainWindow.on('unmaximize', notifyWindowState);
+  mainWindow.on('enter-full-screen', notifyWindowState);
+  mainWindow.on('leave-full-screen', notifyWindowState);
+  mainWindow.on('resized', notifyWindowState);
+  mainWindow.on('moved', notifyWindowState);
+  mainWindow.on('restore', notifyWindowState);
 
   // Ativar efeito Mica no Windows 11 (substitui backdrop-filter CSS puro)
   if (process.platform === 'win32') {
@@ -82,7 +117,12 @@ function createMainWindow() {
 
   // Exibir janela com fade-in suave quando estiver pronta
   mainWindow.once('ready-to-show', () => {
+    if (initialBounds.isMaximized) {
+      mainWindow.maximize();
+    }
     mainWindow.show();
+    notifyWindowState();
+
     // Fade-in: incrementa opacity de 0 → 1 em ~200ms
     let op = 0;
     const step = () => {
@@ -108,10 +148,33 @@ function createMainWindow() {
 // ─── Gerenciamento do Backend C# ──────────────────────────────────────────
 
 /**
- * Inicia o processo do backend C# (AeR.Api.exe).
- * Em modo DEV, apenas loga uma instrução para iniciar manualmente.
+ * Verifica se o Named Pipe do backend já está aceitando conexões.
  */
-function startBackend() {
+function isPipeActive(timeoutMs = 350) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (val) => {
+      if (settled) return;
+      settled = true;
+      try { sock.destroy(); } catch { }
+      resolve(val);
+    };
+    const sock = net.createConnection('\\\\.\\pipe\\AeR_IPC', () => done(true));
+    sock.on('error', () => done(false));
+    setTimeout(() => done(false), timeoutMs);
+  });
+}
+
+/**
+ * Inicia o processo do backend C# (AeR.Api.exe).
+ * Se o pipe já estiver ativo (ex: iniciado pelo start-aer.ps1), não inicia duplicata.
+ */
+async function startBackend() {
+  if (fs.existsSync('\\\\.\\pipe\\AeR_IPC') || await isPipeActive()) {
+    console.log('[AeR Main] Backend já está em execução (pipe ativo).');
+    return;
+  }
+
   const exe = getBackendExe();
   if (!fs.existsSync(exe)) {
     console.warn('[AeR Main] Executável do backend não encontrado:', exe);
@@ -123,6 +186,7 @@ function startBackend() {
 
   try {
     backendProcess = spawn(exe, [], {
+      cwd: path.dirname(exe),
       detached: false,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -181,8 +245,10 @@ async function connectToPipe() {
     });
   });
 
-  // Aguardar backend inicializar antes de conectar
-  await new Promise(resolve => setTimeout(resolve, BACKEND_STARTUP_DELAY_MS));
+  // Aguardar backend inicializar antes de conectar apenas se o pipe ainda não existir
+  if (!fs.existsSync('\\\\.\\pipe\\AeR_IPC')) {
+    await new Promise(resolve => setTimeout(resolve, BACKEND_STARTUP_DELAY_MS));
+  }
 
   try {
     await pipeClient.connect();
@@ -195,14 +261,14 @@ async function connectToPipe() {
 // ─── Handlers IPC (Main ↔ Renderer) ──────────────────────────────────────
 
 /**
- * Handler principal: Renderer chama window.aer.invoke(command, payload)
+ * Handler principal: Renderer chama window.aer.invoke(command, payload, timeoutMs)
  * → preload → ipcRenderer.invoke('backend:invoke', ...) → aqui → Named Pipe → Backend C#
  */
-ipcMain.handle('backend:invoke', async (_event, { command, payload }) => {
+ipcMain.handle('backend:invoke', async (_event, { command, payload, timeoutMs }) => {
   if (!pipeClient.isConnected) {
     throw new Error('Backend não está conectado. Aguarde a reconexão.');
   }
-  return await pipeClient.invoke(command, payload);
+  return await pipeClient.invoke(command, payload, timeoutMs);
 });
 
 // ── Utilitários do sistema ────────────────────────────────────────────────
@@ -214,20 +280,39 @@ ipcMain.handle('app:openExternal', async (_event, url) => {
 
 ipcMain.handle('backend:is-connected', () => pipeClient.isConnected);
 
-// ── Controle de janela frameless ──────────────────────────────────────────
+// ── Controle de janela frameless e responsiva ──────────────────────────
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
-ipcMain.on('window:maximize', () => {
-  if (mainWindow?.isMaximized()) {
+ipcMain.on('window:maximize', () => mainWindow?.maximize());
+ipcMain.on('window:unmaximize', () => mainWindow?.unmaximize());
+ipcMain.on('window:toggle-maximize', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMaximized()) {
     mainWindow.unmaximize();
   } else {
-    mainWindow?.maximize();
+    mainWindow.maximize();
   }
+});
+ipcMain.on('window:toggle-fullscreen', () => {
+  if (!mainWindow) return;
+  mainWindow.setFullScreen(!mainWindow.isFullScreen());
 });
 ipcMain.on('window:close', () => mainWindow?.close());
 
+ipcMain.handle('window:is-maximized', () => mainWindow ? mainWindow.isMaximized() : false);
+ipcMain.handle('window:is-fullscreen', () => mainWindow ? mainWindow.isFullScreen() : false);
+ipcMain.handle('window:get-state', () => {
+  if (!mainWindow) return null;
+  return {
+    isMaximized: mainWindow.isMaximized(),
+    isFullScreen: mainWindow.isFullScreen(),
+    isMinimized: mainWindow.isMinimized(),
+    bounds: mainWindow.getBounds(),
+  };
+});
+
 // ─── Ciclo de Vida da App ─────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  startBackend();
+  await startBackend();
   createMainWindow();
   await connectToPipe();
 

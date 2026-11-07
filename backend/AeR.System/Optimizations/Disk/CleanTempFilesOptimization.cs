@@ -1,5 +1,6 @@
 using AeR.System.Abstractions;
 using AeR.System.Models;
+using AeR.System.Services;
 
 namespace AeR.System.Optimizations.Disk;
 
@@ -33,7 +34,7 @@ public sealed class CleanTempFilesOptimization : OptimizationBase
         {
             Path.GetTempPath(),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Temp"),
-            @"C:\Windows\Temp",
+            AppPaths.WindowsTempDir,
         };
 
         long totalFreed = 0;

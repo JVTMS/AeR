@@ -3,12 +3,13 @@
  * Layout dois painéis: checkboxes de tweaks + botões Aplicar/Reverter.
  */
 import { Logger } from '../utils/logger.js';
-import { invoke } from '../api/pipe-client.js';
+import { invoke, getSystemStatus, elevateBackend } from '../api/pipe-client.js';
 
 const MODULE = 'Tweaks';
 
 // Estado dos tweaks carregados do backend
 let tweaksList = [];
+let isAdmin = true;
 const selected = new Set();
 
 export async function mount(container) {
@@ -45,7 +46,11 @@ function renderSkeleton(container) {
 // ── Carrega lista do backend ──────────────────────────────────────────────
 async function loadTweaks(container) {
   try {
-    const data = await invoke('tweaks:list');
+    const [data, sys] = await Promise.all([
+      invoke('tweaks:list'),
+      getSystemStatus().catch(() => null),
+    ]);
+    if (sys && typeof sys.isAdmin === 'boolean') isAdmin = sys.isAdmin;
     tweaksList = Array.isArray(data) ? data : [];
     renderTweaks(container);
   } catch (e) {
@@ -73,6 +78,11 @@ function renderTweaks(container) {
       </div>
 
       <!-- Aviso -->
+      ${!isAdmin ? `
+      <div class="tw-warning" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <span>🛡️ <strong>Modo Usuário Padrão:</strong> A maioria dos Tweaks do Windows modifica políticas em HKLM e Serviços, exigindo privilégios de Administrador.</span>
+        <button class="tw-btn tw-btn-apply" id="tw-btn-elevate" style="white-space:nowrap;padding:6px 14px;font-size:12px;">🛡️ Ativar Administrador</button>
+      </div>` : ''}
       <div class="tw-warning">
         ⚠️ <strong>Atenção:</strong> Tweaks Avançados modificam configurações críticas do sistema. Crie um ponto de restauração antes de aplicá-los.
       </div>
@@ -141,12 +151,38 @@ function bindEvents(container) {
   container.querySelector('#tw-btn-apply')?.addEventListener('click', () => runAction(container, 'apply'));
   // Reverter
   container.querySelector('#tw-btn-revert')?.addEventListener('click', () => runAction(container, 'revert'));
+  // Elevar Admin
+  container.querySelector('#tw-btn-elevate')?.addEventListener('click', () => ensureAdminTweaks(container));
   // Refresh
   container.querySelector('#tw-refresh')?.addEventListener('click', async () => {
     renderSkeleton(container);
     selected.clear();
     await loadTweaks(container);
   });
+}
+
+async function ensureAdminTweaks(container) {
+  if (isAdmin) return true;
+  const btn = container.querySelector('#tw-btn-elevate');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Aguardando UAC...'; }
+  try {
+    const res = await elevateBackend();
+    if (res?.success) {
+      for (let i = 0; i < 12; i++) {
+        await new Promise(r => setTimeout(r, 700));
+        try {
+          const st = await getSystemStatus();
+          if (st?.isAdmin) {
+            isAdmin = true;
+            await loadTweaks(container);
+            return true;
+          }
+        } catch { }
+      }
+    }
+  } catch { }
+  if (btn) { btn.disabled = false; btn.textContent = '🛡️ Ativar Administrador'; }
+  return false;
 }
 
 function updateHint(container) {
@@ -159,6 +195,14 @@ async function runAction(container, action) {
   if (selected.size === 0) {
     showBanner(container, 'warn', '⚠️ Selecione pelo menos um tweak.');
     return;
+  }
+
+  if (!isAdmin) {
+    const ok = await ensureAdminTweaks(container);
+    if (!ok) {
+      showBanner(container, 'warn', '⚠️ Elevação de Administrador necessária para aplicar/reverter Tweaks.');
+      return;
+    }
   }
 
   const applyBtn  = container.querySelector('#tw-btn-apply');

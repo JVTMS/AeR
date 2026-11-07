@@ -10,10 +10,21 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // ─── API de Controle da Janela ────────────────────────────────────────────
 contextBridge.exposeInMainWorld('windowAPI', {
-  minimize:     () => ipcRenderer.send('window:minimize'),
-  maximize:     () => ipcRenderer.send('window:maximize'),
-  close:        () => ipcRenderer.send('window:close'),
-  openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
+  minimize:         () => ipcRenderer.send('window:minimize'),
+  maximize:         () => ipcRenderer.send('window:maximize'),
+  unmaximize:       () => ipcRenderer.send('window:unmaximize'),
+  toggleMaximize:   () => ipcRenderer.send('window:toggle-maximize'),
+  toggleFullscreen: () => ipcRenderer.send('window:toggle-fullscreen'),
+  close:            () => ipcRenderer.send('window:close'),
+  openExternal:     (url) => ipcRenderer.invoke('app:openExternal', url),
+  isMaximized:      () => ipcRenderer.invoke('window:is-maximized'),
+  isFullScreen:     () => ipcRenderer.invoke('window:is-fullscreen'),
+  getState:         () => ipcRenderer.invoke('window:get-state'),
+  onStateChange: (callback) => {
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('window:state-changed', handler);
+    return () => ipcRenderer.removeListener('window:state-changed', handler);
+  },
 });
 
 // ─── API de IPC com o Backend C# ─────────────────────────────────────────
@@ -22,10 +33,11 @@ contextBridge.exposeInMainWorld('aer', {
    * Envia um comando ao backend C# via Named Pipe (passando pelo Main Process).
    * @param {string} command - Ex: 'ping', 'metrics:get', 'processes:list'
    * @param {object} [payload] - Dados opcionais do comando
+   * @param {number} [timeoutMs] - Timeout opcional em ms
    * @returns {Promise<object>} Resposta do backend
    */
-  invoke: (command, payload) =>
-    ipcRenderer.invoke('backend:invoke', { command, payload }),
+  invoke: (command, payload, timeoutMs) =>
+    ipcRenderer.invoke('backend:invoke', { command, payload, timeoutMs }),
 
   /**
    * Abre uma URL externa no navegador padrão do sistema.

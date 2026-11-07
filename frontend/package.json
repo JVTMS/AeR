@@ -1,6 +1,6 @@
 {
   "name": "aer-frontend",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "description": "AeR (Advanced Engine Reborn) - Frontend Electron com Glassmorphism/Fluent Design",
   "author": "AeR Team",
   "license": "MIT",
@@ -12,11 +12,72 @@
     "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^36.4.0"
+    "electron": "^36.4.0",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "chart.js": "^4.5.1",
     "chartjs-adapter-luxon": "^1.3.1",
     "luxon": "^3.7.2"
+  },
+  "build": {
+    "appId": "com.aer.app",
+    "productName": "AeR",
+    "copyright": "Copyright © 2026 AeR Team",
+    "icon": "assets/icon.ico",
+    "asar": true,
+    "forceCodeSigning": false,
+    "disableSanityCheckAsar": true,
+    "directories": {
+      "output": "../dist"
+    },
+    "files": [
+      "main/**",
+      "preload/**",
+      "html/**",
+      "css/**",
+      "js/**",
+      "assets/**",
+      "node_modules/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../release/backend/AeR.Api.exe",
+        "to": "backend/AeR.Api.exe"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "AeR-Setup-v${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AeR",
+      "runAfterFinish": true,
+      "installerSidebar": null,
+      "uninstallerSidebar": null,
+      "include": "installer/aer-installer.nsh",
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "allowScripts": {
+    "electron@36.9.5": true
   }
 }

@@ -49,7 +49,22 @@ const CLEANUP_OPTIONS = [
 
 // ── Estado ────────────────────────────────────────────────────────────────
 const selected = new Set(CLEANUP_OPTIONS.filter(o => o.defaultOn).map(o => o.id));
-let lastCleanDate = null;
+const LAST_CLEAN_KEY = 'aer:lastCleanDate';
+let lastCleanDate = localStorage.getItem(LAST_CLEAN_KEY) || null;
+let resultTimer = null;
+
+function formatCleanDate(isoDate) {
+  if (!isoDate) return 'Ainda não foi limpa';
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return 'Ainda não foi limpa';
+  return d.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export async function mount(container) {
   Logger.info(MODULE, 'Montando Limpeza v2.0...');
@@ -57,13 +72,16 @@ export async function mount(container) {
   render(container);
 }
 
-export function unmount() {}
+export function unmount() {
+  if (resultTimer) {
+    clearTimeout(resultTimer);
+    resultTimer = null;
+  }
+}
 
 // ── Render ────────────────────────────────────────────────────────────────
 function render(container) {
-  const lastClean = lastCleanDate
-    ? new Date(lastCleanDate).toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
-    : 'Ainda não foi limpa';
+  const lastClean = formatCleanDate(lastCleanDate);
 
   container.innerHTML = `
     <div class="cl-root">
@@ -72,7 +90,7 @@ function render(container) {
         <div class="cl-header-icon">🚀</div>
         <div>
           <div class="cl-header-title">Limpeza do Sistema</div>
-          <div class="cl-header-sub">Última limpeza: ${lastClean}</div>
+          <div class="cl-header-sub" id="cl-header-sub">Última limpeza: ${lastClean}</div>
         </div>
       </div>
 
@@ -150,11 +168,21 @@ async function runClean(container) {
   const paths = [...selected].map(id => CLEANUP_OPTIONS.find(o => o.id === id)?.path).filter(Boolean);
 
   try {
-    const res = await invoke('cleanup:execute', { paths });
+    const res = await invoke('cleanup:execute', { paths }, 60000);
     lastCleanDate = new Date().toISOString();
+    try { localStorage.setItem(LAST_CLEAN_KEY, lastCleanDate); } catch { }
+
+    const subEl = container.querySelector('#cl-header-sub');
+    if (subEl) subEl.textContent = `Última limpeza: ${formatCleanDate(lastCleanDate)}`;
+
     const freed = res?.freedMb ?? 0;
+    const filesCount = res?.deletedFiles ?? 0;
     btn.textContent = `✅ ${freed} MB liberados!`;
-    showResult(result, 'ok', `✅ Limpeza concluída! <strong>${freed} MB</strong> liberados com sucesso.`);
+    showResult(
+      result,
+      'ok',
+      `✅ Limpeza concluída! <strong>${freed} MB</strong> liberados (${filesCount} arquivo(s) removido(s)).`
+    );
     setTimeout(() => {
       btn.disabled = false;
       btn.textContent = '🧹 Limpar Selecionados';
@@ -162,16 +190,19 @@ async function runClean(container) {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = '🧹 Limpar Selecionados';
-    showResult(result, 'error', `❌ Erro ao limpar: ${e?.message ?? 'Falha desconhecida'}`);
+    const rawMsg = e?.message ?? 'Falha desconhecida';
+    const cleanMsg = rawMsg.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/i, '');
+    showResult(result, 'error', `❌ Erro ao limpar: ${cleanMsg}`);
   }
 }
 
 function showResult(el, type, html) {
   if (!el) return;
+  if (resultTimer) clearTimeout(resultTimer);
   el.className = `cl-result cl-result--${type}`;
   el.innerHTML = html;
   el.style.display = 'block';
-  setTimeout(() => { el.style.display = 'none'; }, 5000);
+  resultTimer = setTimeout(() => { el.style.display = 'none'; }, 5000);
 }
 
 // ── Estilos ───────────────────────────────────────────────────────────────

@@ -1,12 +1,14 @@
-﻿using AeR.System.Abstractions;
+using AeR.System.Abstractions;
 using AeR.System.Models;
 namespace AeR.System.Optimizations.Gpu;
 public sealed class NvidiaTelemetryDisableOptimization : OptimizationBase
 {
-    private static readonly string[] Services = ["NvTelemetryContainer", "NvContainerLocalSystem", "NvContainerNetworkService"];
+    private const string RegPath = @"SOFTWARE\NVIDIA Corporation\NvControlPanel2\Client";
+    private const string RegValue = "OptInOrOutPreference";
+    private static readonly string[] Services = ["NvTelemetryContainer"];
     public override string Id          => "gpu.nvidia-telemetry";
     public override string Name        => "Desativar Telemetria NVIDIA";
-    public override string Description => "Para os servicos de telemetria da NVIDIA que consomem CPU e rede em segundo plano.";
+    public override string Description => "Desativa a coleta de telemetria e servicos de telemetria da NVIDIA que consomem CPU e rede em segundo plano.";
     public override string Category    => "GPU";
     public override OptimizationMode Mode   => OptimizationMode.Both;
     public override RiskLevel         Risk   => RiskLevel.Safe;
@@ -17,6 +19,10 @@ public sealed class NvidiaTelemetryDisableOptimization : OptimizationBase
     {
         try
         {
+            using var regKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(RegPath);
+            if (regKey?.GetValue(RegValue) is int opt && opt == 0)
+                return true;
+
             using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
                 @"SYSTEM\CurrentControlSet\Services\NvTelemetryContainer");
             return key?.GetValue("Start") is int v && v == 4; // 4 = Disabled
@@ -30,7 +36,11 @@ public sealed class NvidiaTelemetryDisableOptimization : OptimizationBase
             await RunProcessAsync("sc.exe", $"stop {svc}", ct);
             await RunProcessAsync("sc.exe", $"config {svc} start= disabled", ct);
         }
-        return OptimizationResult.Ok("Servicos de telemetria NVIDIA desativados.");
+        var (exit, _, err) = await RunProcessAsync("reg.exe",
+            $@"add ""HKLM\{RegPath}"" /v {RegValue} /t REG_DWORD /d 0 /f", ct);
+        return exit == 0
+            ? OptimizationResult.Ok("Telemetria NVIDIA desativada.")
+            : OptimizationResult.Fail("Falha ao desativar telemetria NVIDIA.", err);
     }
     public override async Task<OptimizationResult> RevertAsync(CancellationToken ct)
     {
@@ -39,6 +49,10 @@ public sealed class NvidiaTelemetryDisableOptimization : OptimizationBase
             await RunProcessAsync("sc.exe", $"config {svc} start= auto", ct);
             await RunProcessAsync("sc.exe", $"start {svc}", ct);
         }
-        return OptimizationResult.Ok("Servicos de telemetria NVIDIA reativados.");
+        var (exit, _, err) = await RunProcessAsync("reg.exe",
+            $@"add ""HKLM\{RegPath}"" /v {RegValue} /t REG_DWORD /d 1 /f", ct);
+        return exit == 0
+            ? OptimizationResult.Ok("Telemetria NVIDIA reativada.")
+            : OptimizationResult.Fail("Falha ao reativar telemetria NVIDIA.", err);
     }
 }

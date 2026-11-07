@@ -1,4 +1,4 @@
-﻿import { Logger } from '../utils/logger.js';
+import { Logger } from '../utils/logger.js';
 import { invoke } from '../api/pipe-client.js';
 const MODULE = 'Library';
 const CATS = ['Todos','Editores de Video','Editores de Imagem','Navegadores','Utilitarios','Jogos','Desenvolvimento','Outros'];
@@ -121,7 +121,7 @@ function injectStyles() {
     .lib-filter-btn.active,.lib-filter-btn:hover{background:var(--color-accent);color:#000;border-color:var(--color-accent)}
     .lib-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:var(--space-12);gap:var(--space-3);color:var(--color-text-muted);text-align:center}
     .lib-empty-icon{font-size:56px}.lib-empty h3{margin:0;color:var(--color-text-primary)}.lib-empty p{margin:0}
-    .lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:var(--space-5)}
+    .lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(280px, 100%),1fr));gap:var(--space-5)}
     .lib-card{background:var(--color-bg-surface-1);border:1px solid var(--color-border-subtle);border-radius:var(--radius-xl);padding:var(--space-5);display:flex;flex-direction:column;gap:var(--space-3);transition:var(--transition-base)}
     .lib-card:hover{border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.2)}
     .lib-card-header{display:flex;align-items:center;gap:var(--space-3)}

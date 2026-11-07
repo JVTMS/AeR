@@ -1,13 +1,21 @@
-# AeR — Build Self-Contained (Fase 14)
-# Gera AeR.Api.exe standalone (~80MB) sem precisar do .NET instalado.
+# AeR - Build Self-Contained (Fase 14 + Empacotamento Electron)
+# Gera AeR.Api.exe standalone (~80MB) e o instalador AeR-Setup-v1.2.0.exe
 # Uso: .\build-release.ps1
 
 $ErrorActionPreference = 'Stop'
-$Root       = $PSScriptRoot
-$BackendDir = Join-Path $Root "backend\AeR.Api"
-$ProjFile   = Join-Path $BackendDir "AeR.Api.csproj"
-$PublishDir = Join-Path $Root "release\backend"
-$DotnetExe  = "C:\Program Files\dotnet\dotnet.exe"
+$Root        = $PSScriptRoot
+$BackendDir  = Join-Path $Root "backend\AeR.Api"
+$ProjFile    = Join-Path $BackendDir "AeR.Api.csproj"
+$PublishDir  = Join-Path $Root "release\backend"
+$FrontendDir = Join-Path $Root "frontend"
+$DistDir     = Join-Path $Root "dist"
+
+$DotnetCmd = Get-Command dotnet -ErrorAction SilentlyContinue
+if ($DotnetCmd) {
+    $DotnetExe = $DotnetCmd.Source
+} else {
+    $DotnetExe = "C:\Program Files\dotnet\dotnet.exe"
+}
 
 function Log { param([string]$Msg) Write-Host "  $Msg" -ForegroundColor Cyan }
 function Ok  { param([string]$Msg) Write-Host "  [OK] $Msg" -ForegroundColor Green }
@@ -15,7 +23,7 @@ function Err { param([string]$Msg) Write-Host "  [ERRO] $Msg" -ForegroundColor R
 
 Write-Host ""
 Write-Host "================================================" -ForegroundColor Magenta
-Write-Host "  AeR — Build Release (Self-Contained)" -ForegroundColor Magenta
+Write-Host "  AeR - Build Release (Self-Contained)"         -ForegroundColor Magenta
 Write-Host "================================================" -ForegroundColor Magenta
 Write-Host ""
 
@@ -31,6 +39,8 @@ Log "Publicando backend self-contained (win-x64)..."
     --runtime win-x64 `
     --self-contained true `
     -p:PublishSingleFile=true `
+    -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:IncludeAllContentForSelfExtract=true `
     -p:EnableCompressionInSingleFile=true `
     --output $PublishDir `
     2>&1 | Out-Null
@@ -39,66 +49,82 @@ if ($LASTEXITCODE -ne 0) { Err "Publish falhou. Verifique os erros acima." }
 $exePath = Join-Path $PublishDir "AeR.Api.exe"
 if (-not (Test-Path $exePath)) { Err "AeR.Api.exe nao gerado em $PublishDir" }
 $sizeMb = [math]::Round((Get-Item $exePath).Length / 1MB, 1)
-Ok "AeR.Api.exe gerado! Tamanho: ${sizeMb} MB"
+Ok "AeR.Api.exe gerado! Tamanho: $sizeMb MB"
 
-# 3. Criar start-aer-release.ps1 que usa o .exe em vez de dotnet run
-$releaseScript = Join-Path $Root "start-aer-release.ps1"
-$scriptContent = @"
-# AeR Launcher Release v1.0 - Usa AeR.Api.exe self-contained (sem .NET instalado)
-`$ErrorActionPreference = 'SilentlyContinue'
-`$Root       = `$PSScriptRoot
-`$BackendExe = Join-Path `$Root "release\backend\AeR.Api.exe"
-`$FrontendDir = Join-Path `$Root "frontend"
-`$LogsDir    = Join-Path `$Root "logs"
-`$LogFile    = Join-Path `$LogsDir "launcher.log"
+# 3. Empacotar o frontend com electron-builder
+Write-Host ""
+Write-Host "------------------------------------------------" -ForegroundColor Cyan
+Write-Host "  Empacotando frontend (electron-builder)..."    -ForegroundColor Cyan
+Write-Host "------------------------------------------------" -ForegroundColor Cyan
 
-New-Item -ItemType Directory -Path `$LogsDir -Force | Out-Null
-function Log { param([string]`$Msg) `$ts = Get-Date -Format "HH:mm:ss"; `$line = "[`$ts] `$Msg"; Add-Content -Path `$LogFile -Value `$line -Encoding UTF8; Write-Host `$line }
+# Verificar npm
+$npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+if (-not $npmCmd) { Err "npm nao encontrado no PATH. Instale Node.js para compilar o frontend." }
+Ok "npm encontrado: $($npmCmd.Source)"
 
-if (-not (Test-Path `$BackendExe)) {
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.MessageBox]::Show("AeR.Api.exe nao encontrado!``nExecute build-release.ps1 primeiro.", "AeR", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-    exit 1
+# -- Workaround: pre-popular cache do winCodeSign sem symlinks macOS ----------
+# O electron-builder usa winCodeSign (contem signtool.exe bundlado).
+# O .7z inclui symlinks macOS que o Windows nao consegue criar sem Developer
+# Mode ativo. Baixamos e extraimos manualmente ignorando esses symlinks.
+$winCodeSignCache  = "$env:LOCALAPPDATA\electron-builder\Cache\winCodeSign"
+$winCodeSignTarget = "$winCodeSignCache\winCodeSign-2.6.0"
+$winCodeSignUrl    = "https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z"
+$sevenZip          = Join-Path $FrontendDir "node_modules\7zip-bin\win\x64\7za.exe"
+
+if (-not (Test-Path "$winCodeSignTarget\windows-10\x64\signtool.exe")) {
+    Log "Preparando cache do winCodeSign (necessario apenas uma vez)..."
+    New-Item -ItemType Directory -Path $winCodeSignCache -Force | Out-Null
+    $archivePath = "$winCodeSignCache\winCodeSign-2.6.0.7z"
+    if (-not (Test-Path $archivePath)) {
+        Log "Baixando winCodeSign (~5.6 MB)..."
+        & curl.exe -L -s -o $archivePath $winCodeSignUrl
+        if ($LASTEXITCODE -ne 0) { Err "Falha ao baixar winCodeSign." }
+    }
+    Log "Extraindo winCodeSign..."
+    & $sevenZip x -snld -y $archivePath "-o$winCodeSignTarget" 2>&1 | Out-Null
+    # Criar arquivos dummy para os symlinks macOS que o Windows nao consegue criar
+    $symlinkDir = "$winCodeSignTarget\darwin\10.12\lib"
+    New-Item -ItemType Directory -Path $symlinkDir -Force | Out-Null
+    $null = New-Item -ItemType File -Path "$symlinkDir\libcrypto.dylib" -Force -ErrorAction SilentlyContinue
+    $null = New-Item -ItemType File -Path "$symlinkDir\libssl.dylib"    -Force -ErrorAction SilentlyContinue
+    Ok "Cache do winCodeSign preparado."
+} else {
+    Ok "Cache do winCodeSign ja existe - pulando."
 }
 
-Log "AeR Release iniciando..."
-Get-Process -Name "AeR.Api","electron" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 500
+# Instalar dependencias npm
+Log "Instalando dependencias npm..."
+Push-Location $FrontendDir
+try {
+    & cmd /c "npm install" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Err "npm install falhou." }
+    Ok "Dependencias instaladas."
 
-`$backendLog    = Join-Path `$LogsDir "backend.log"
-`$backendErrLog = Join-Path `$LogsDir "backend-err.log"
-Remove-Item `$backendLog,`$backendErrLog -Force -ErrorAction SilentlyContinue
-
-Log "Iniciando AeR.Api.exe..."
-`$backend = Start-Process -FilePath `$BackendExe -PassThru -WindowStyle Hidden -RedirectStandardOutput `$backendLog -RedirectStandardError `$backendErrLog
-if (`$null -eq `$backend) { Log "ERRO: Falha ao iniciar backend."; exit 1 }
-Log "Backend PID `$(`$backend.Id). Aguardando pipe..."
-
-`$elapsed = 0; `$pipeReady = `$false
-while (`$elapsed -lt 15) {
-    if (`$backend.HasExited) { Log "ERRO: Backend encerrou."; exit 2 }
-    try {
-        `$p = New-Object System.IO.Pipes.NamedPipeClientStream(".", "AeR_IPC", [System.IO.Pipes.PipeDirection]::InOut)
-        `$p.Connect(300); `$p.Close(); `$p.Dispose()
-        `$pipeReady = `$true; Log "Pipe pronto em `${elapsed}s."; break
-    } catch {}
-    Start-Sleep -Seconds 1; `$elapsed++
+    # Executar electron-builder (sem auto-deteccao de certificados do store do Windows)
+    Log "Gerando instalador (electron-builder)..."
+    $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
+    & cmd /c "npx electron-builder --win" 2>&1
+    if ($LASTEXITCODE -ne 0) { Err "electron-builder falhou. Verifique os erros acima." }
+} finally {
+    $env:CSC_IDENTITY_AUTO_DISCOVERY = ""
+    Pop-Location
 }
-if (-not `$pipeReady) { Log "AVISO: Pipe nao ficou disponivel. Electron tentara reconectar." }
 
-Log "Iniciando Electron..."
-`$electron = Start-Process -FilePath "cmd.exe" -ArgumentList "/c","npm.cmd","start" -WorkingDirectory `$FrontendDir -PassThru -WindowStyle Hidden
-Log "Electron PID `$(`$electron.Id). AeR Release iniciado!"
-"@
-
-Set-Content -Path $releaseScript -Value $scriptContent -Encoding UTF8
-Ok "start-aer-release.ps1 criado!"
+# Encontrar o instalador gerado
+$setupFile = Get-ChildItem -Path $DistDir -Filter "AeR-Setup-*.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($setupFile) {
+    $setupMb = [math]::Round($setupFile.Length / 1MB, 1)
+    Ok "Instalador gerado: $($setupFile.FullName) ($setupMb MB)"
+} else {
+    Log "AVISO: Instalador .exe nao encontrado em $DistDir - verifique a saida do electron-builder acima."
+}
 
 Write-Host ""
 Write-Host "================================================" -ForegroundColor Green
-Write-Host "  BUILD COMPLETO!" -ForegroundColor Green
-Write-Host "  Backend: $PublishDir\AeR.Api.exe ($sizeMb MB)" -ForegroundColor Green
-Write-Host "  Launcher: $releaseScript" -ForegroundColor Green
-Write-Host "  Inicializacao: ~1s (vs ~8s com dotnet run)" -ForegroundColor Green
+Write-Host "  BUILD COMPLETO!"                               -ForegroundColor Green
+Write-Host "  Backend:    $PublishDir\AeR.Api.exe ($sizeMb MB)" -ForegroundColor Green
+if ($setupFile) {
+    Write-Host "  Instalador: $($setupFile.FullName) ($setupMb MB)" -ForegroundColor Green
+}
 Write-Host "================================================" -ForegroundColor Green
 Write-Host ""

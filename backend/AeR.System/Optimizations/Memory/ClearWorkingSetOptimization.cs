@@ -30,7 +30,7 @@ public sealed class ClearWorkingSetOptimization : OptimizationBase
     public override async Task<OptimizationResult> ApplyAsync(CancellationToken ct)
     {
         var (exit, _, err) = await RunPowerShellAsync(
-            "Get-Process | ForEach-Object { $_.MinWorkingSet = 4096; $_.MaxWorkingSet = [IntPtr]::MaxValue } -ErrorAction SilentlyContinue",
+            "Get-Process -ErrorAction SilentlyContinue | ForEach-Object { try { $_.MinWorkingSet = [IntPtr]4096 } catch {} }",
             ct);
 
         return exit == 0
